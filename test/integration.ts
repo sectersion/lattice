@@ -251,6 +251,30 @@ async function main() {
       delete process.env.ADMIN_TOKEN;
     }
 
+    // 19. malformed JSON body -> 400 JSON error, not a raw HTML crash
+    const malformed = await fetch(`${base}/threads`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{not json",
+    });
+    assert.strictEqual(malformed.status, 400);
+    const malformedJson = await malformed.json();
+    assert.strictEqual(malformedJson.error, "malformed JSON body");
+
+    // 20. non-numeric thread id -> 400, not a silent NaN-driven 404
+    const nonNumericId = await call("GET", "/threads/not-a-number");
+    assert.strictEqual(nonNumericId.status, 400);
+    const nonNumericReply = await call("POST", "/threads/not-a-number/reply", {
+      name: "A",
+      id: a.json.id,
+      body: "x",
+    });
+    assert.strictEqual(nonNumericReply.status, 400);
+
+    // 21. GET /threads?limit= is clamped, not unbounded
+    const bigLimit = await call("GET", "/threads?limit=999999999");
+    assert.ok(bigLimit.json.threads.length <= 200);
+
     console.log("all integration checks passed");
   } finally {
     server.close();

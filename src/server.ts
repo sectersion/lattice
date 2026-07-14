@@ -11,6 +11,10 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   const startedAt = Date.now();
   const adminToken = process.env.ADMIN_TOKEN;
   app.use(express.json());
+  app.use((req: Request, _res: Response, next) => {
+    console.log(`${new Date().toISOString()} ${req.method} ${req.originalUrl}`);
+    next();
+  });
   app.use(express.static(path.join(__dirname, "..", "public")));
 
   function resolveAgent(name: unknown, id: unknown): { id: number } | null {
@@ -76,6 +80,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
   app.post("/threads/:id/reply", (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
+    if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
     const { name, id, body, link_thread_id } = req.body ?? {};
     const agent = resolveAgent(name, id);
     if (!agent) return res.status(400).json({ error: "unknown agent" });
@@ -140,7 +145,8 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       params.push(`%${title.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    params.push(limit ? Number(limit) : 50);
+    const limitNum = limit ? Number(limit) : 50;
+    params.push(Number.isInteger(limitNum) && limitNum > 0 ? Math.min(limitNum, 200) : 50);
 
     const rows = db
       .prepare(
@@ -159,6 +165,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
   app.get("/threads/:id", (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
+    if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
     const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(threadId);
     if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
 
@@ -210,6 +217,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
   app.post("/threads/:id/close", (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
+    if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
     const { name, id } = req.body ?? {};
     const agent = resolveAgent(name, id);
     if (!agent) return res.status(400).json({ error: "unknown agent" });
@@ -231,6 +239,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       return res.status(401).json({ error: "unauthorized" });
     }
     const threadId = Number(req.params.id);
+    if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
     const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(threadId);
     if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
     db.prepare("UPDATE threads SET status = 'closed' WHERE id = ?").run(threadId);
@@ -295,6 +304,17 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       messages,
       agents,
     });
+  });
+
+  // ponytail: last-resort JSON error handler — malformed body or an
+  // unexpected DB error becomes a 400/500 JSON response instead of
+  // Express's default HTML page. Express 4 auto-forwards sync throws here.
+  app.use((err: any, _req: Request, res: Response, _next: express.NextFunction) => {
+    if (err?.type === "entity.parse.failed") {
+      return res.status(400).json({ error: "malformed JSON body" });
+    }
+    console.error(err);
+    res.status(500).json({ error: "internal error" });
   });
 
   return app;
