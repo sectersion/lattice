@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function createServer(db: DatabaseSync) {
+export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "/data/threads.db") {
   const app = express();
+  const startedAt = Date.now();
+  const adminToken = process.env.ADMIN_TOKEN;
   app.use(express.json());
   app.use(express.static(path.join(__dirname, "..", "public")));
 
@@ -122,7 +124,7 @@ export function createServer(db: DatabaseSync) {
   });
 
   app.get("/threads", (req: Request, res: Response) => {
-    const { status, before, limit } = req.query;
+    const { status, before, limit, title } = req.query;
     const conditions: string[] = [];
     const params: (string | number)[] = [];
     if (status === "open" || status === "closed") {
@@ -132,6 +134,10 @@ export function createServer(db: DatabaseSync) {
     if (before) {
       conditions.push("t.id < ?");
       params.push(Number(before));
+    }
+    if (typeof title === "string" && title) {
+      conditions.push("t.title LIKE ? ESCAPE '\\'");
+      params.push(`%${title.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     params.push(limit ? Number(limit) : 50);
@@ -220,9 +226,10 @@ export function createServer(db: DatabaseSync) {
     res.json({ ok: true });
   });
 
-  // ponytail: no auth — trusted-network-only admin surface, see WEBUI_IMPLEMENTATION_PLAN.md.
-  // Upgrade path: ADMIN_TOKEN env var + header check, if ever exposed beyond a trusted network.
   app.post("/admin/threads/:id/close", (req: Request, res: Response) => {
+    if (adminToken && req.header("authorization") !== `Bearer ${adminToken}`) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
     const threadId = Number(req.params.id);
     const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(threadId);
     if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
@@ -248,6 +255,46 @@ export function createServer(db: DatabaseSync) {
     if (!row) return res.status(404).json({ error: "unknown notification" });
     db.prepare("UPDATE notifications SET acked = 1 WHERE id = ?").run(Number(notif_id));
     res.json({ ok: true });
+  });
+
+  app.post("/ignore-notif/batch", (req: Request, res: Response) => {
+    const { id, notif_ids } = req.body ?? {};
+    if (!Array.isArray(notif_ids)) return res.status(400).json({ error: "notif_ids required" });
+    const ack = db.prepare("UPDATE notifications SET acked = 1 WHERE id = ? AND agent_id = ?");
+    let acked = 0;
+    for (const notifId of notif_ids) {
+      acked += ack.run(Number(notifId), Number(id)).changes as number;
+    }
+    res.json({ acked });
+  });
+
+  app.post("/agents/rotate-secret", (req: Request, res: Response) => {
+    const { name, id, secret } = req.body ?? {};
+    const row = db.prepare("SELECT id, secret FROM agents WHERE id = ?").get(Number(id)) as
+      | { id: number; secret: string }
+      | undefined;
+    if (!row) return res.status(404).json({ error: "unknown agent" });
+    const nameRow = db.prepare("SELECT name FROM agents WHERE id = ?").get(row.id) as { name: string };
+    if (nameRow.name !== name || row.secret !== secret) {
+      return res.status(403).json({ error: "invalid secret" });
+    }
+    const newSecret = crypto.randomBytes(16).toString("hex");
+    db.prepare("UPDATE agents SET secret = ? WHERE id = ?").run(newSecret, row.id);
+    res.json({ secret: newSecret });
+  });
+
+  app.get("/health", (_req: Request, res: Response) => {
+    const threads = (db.prepare("SELECT COUNT(*) AS c FROM threads").get() as { c: number }).c;
+    const messages = (db.prepare("SELECT COUNT(*) AS c FROM messages").get() as { c: number }).c;
+    const agents = (db.prepare("SELECT COUNT(*) AS c FROM agents").get() as { c: number }).c;
+    res.json({
+      status: "ok",
+      uptime_seconds: Math.floor((Date.now() - startedAt) / 1000),
+      db_path: dbPath,
+      threads,
+      messages,
+      agents,
+    });
   });
 
   return app;

@@ -169,6 +169,88 @@ async function main() {
     const adminCloseUnknown = await call("POST", `/admin/threads/99999/close`, {});
     assert.strictEqual(adminCloseUnknown.status, 404);
 
+    // 14. GET /threads?title= case-insensitive substring match
+    const titleSearch = await call("GET", "/threads?title=thread 1");
+    assert.ok(titleSearch.json.threads.some((t: { id: number }) => t.id === thread1));
+    assert.ok(!titleSearch.json.threads.some((t: { id: number }) => t.id === thread2));
+
+    // 15. GET /health
+    const health = await call("GET", "/health");
+    assert.strictEqual(health.status, 200);
+    assert.strictEqual(health.json.status, "ok");
+    assert.ok(health.json.threads >= 2);
+    assert.ok(health.json.messages >= 3);
+    assert.ok(health.json.agents >= 3);
+
+    // 16. POST /ignore-notif/batch acks several at once, unknown ids ignored
+    await call("POST", `/threads/${thread1}/reply`, { name: "B", id: b.json.id, body: "x1" });
+    await call("POST", `/threads/${thread1}/reply`, { name: "B", id: b.json.id, body: "x2" });
+    const pendingA = (await call("GET", `/notifications?id=${a.json.id}`)).json.notifications;
+    const idsToAck = pendingA.slice(0, 2).map((n: { notif_id: number }) => n.notif_id);
+    const batchRes = await call("POST", "/ignore-notif/batch", {
+      id: a.json.id,
+      notif_ids: [...idsToAck, 999999],
+    });
+    assert.strictEqual(batchRes.status, 200);
+    assert.strictEqual(batchRes.json.acked, idsToAck.length);
+    const afterBatch = (await call("GET", `/notifications?id=${a.json.id}`)).json.notifications;
+    assert.ok(!afterBatch.some((n: { notif_id: number }) => idsToAck.includes(n.notif_id)));
+
+    // 17. POST /agents/rotate-secret
+    const rotateBad = await call("POST", "/agents/rotate-secret", {
+      name: "A",
+      id: a.json.id,
+      secret: "wrong",
+    });
+    assert.strictEqual(rotateBad.status, 403);
+    const rotateUnknown = await call("POST", "/agents/rotate-secret", {
+      name: "nobody",
+      id: 999999,
+      secret: "x",
+    });
+    assert.strictEqual(rotateUnknown.status, 404);
+    const rotateOk = await call("POST", "/agents/rotate-secret", {
+      name: "A",
+      id: a.json.id,
+      secret: a.json.secret,
+    });
+    assert.strictEqual(rotateOk.status, 200);
+    assert.notStrictEqual(rotateOk.json.secret, a.json.secret);
+    const reconnectOldSecret = await call("POST", "/register", { name: "A", secret: a.json.secret });
+    assert.strictEqual(reconnectOldSecret.status, 409);
+    const reconnectNewSecret = await call("POST", "/register", {
+      name: "A",
+      secret: rotateOk.json.secret,
+    });
+    assert.strictEqual(reconnectNewSecret.status, 200);
+    a.json.secret = rotateOk.json.secret;
+
+    // 18. ADMIN_TOKEN gates /admin/threads/:id/close when set
+    process.env.ADMIN_TOKEN = "s3cr3t";
+    const adminApp = createServer(db, dbPath);
+    const adminServer = adminApp.listen(0);
+    await new Promise((resolve) => adminServer.once("listening", resolve));
+    const adminPort = (adminServer.address() as { port: number }).port;
+    try {
+      const noAuth = await fetch(`http://localhost:${adminPort}/admin/threads/${thread1}/close`, {
+        method: "POST",
+      });
+      assert.strictEqual(noAuth.status, 401);
+      const wrongAuth = await fetch(`http://localhost:${adminPort}/admin/threads/${thread1}/close`, {
+        method: "POST",
+        headers: { authorization: "Bearer wrong" },
+      });
+      assert.strictEqual(wrongAuth.status, 401);
+      const rightAuth = await fetch(`http://localhost:${adminPort}/admin/threads/${thread1}/close`, {
+        method: "POST",
+        headers: { authorization: "Bearer s3cr3t" },
+      });
+      assert.strictEqual(rightAuth.status, 200);
+    } finally {
+      adminServer.close();
+      delete process.env.ADMIN_TOKEN;
+    }
+
     console.log("all integration checks passed");
   } finally {
     server.close();

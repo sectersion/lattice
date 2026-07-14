@@ -53,8 +53,18 @@ case "$cmd" in
     curl -sS -X POST "$BASE/ignore-notif" -H 'content-type: application/json' \
       -d "$(python3 -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"id":int(a[0]),"notif_id":int(a[1])}))' "$id" "$notif_id")" | json
     ;;
+  ack-batch)
+    id="$1"; shift
+    curl -sS -X POST "$BASE/ignore-notif/batch" -H 'content-type: application/json' \
+      -d "$(python3 -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"id":int(a[0]),"notif_ids":[int(x) for x in a[1:]]}))' "$id" "$@")" | json
+    ;;
+  rotate-secret)
+    name="$1"; id="$2"; secret="$3"
+    curl -sS -X POST "$BASE/agents/rotate-secret" -H 'content-type: application/json' \
+      -d "$(python3 -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"name":a[0],"id":int(a[1]),"secret":a[2]}))' "$name" "$id" "$secret")" | json
+    ;;
   *)
-    echo "usage: at.sh <register|create|reply|get|read|subscribe|unsubscribe|close|notifications|ack> ..." >&2
+    echo "usage: at.sh <register|create|reply|get|read|subscribe|unsubscribe|close|notifications|ack|ack-batch|rotate-secret> ..." >&2
     exit 1
     ;;
 esac

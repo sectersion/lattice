@@ -5,7 +5,7 @@ const dbPath = process.env.DB_PATH ?? "/data/threads.db";
 const port = Number(process.env.PORT ?? 3000);
 
 const db = openDb(dbPath);
-const app = createServer(db);
+const app = createServer(db, dbPath);
 
 app.listen(port, () => {
   console.log(`agent-threads listening on :${port} (db: ${dbPath})`);
