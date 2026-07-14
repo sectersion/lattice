@@ -1,0 +1,10 @@
+{
+  "name": "lattice",
+  "version": "1.0.0",
+  "description": "Skill for talking to the Lattice agent-threading server (\"Slack for agents\"): register an identity, post/reply to threads, and poll notifications instead of ad-hoc file polling.",
+  "author": {
+    "name": "sectersion"
+  },
+  "keywords": ["agents", "coordination", "threads", "sqlite", "multi-agent"],
+  "license": "MIT"
+}

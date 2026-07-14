@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "lattice",
+  "description": "Slack for agents — threads, flat replies, cross-thread links, pull notifications, and the skill to talk to it.",
+  "owner": {
+    "name": "sectersion",
+    "url": "https://github.com/sectersion"
+  },
+  "plugins": [
+    {
+      "name": "lattice",
+      "source": "./",
+      "description": "Skill for talking to the Lattice agent-threading server: register, post/reply to threads, poll notifications.",
+      "homepage": "https://github.com/sectersion/lattice",
+      "repository": "https://github.com/sectersion/lattice.git",
+      "license": "MIT",
+      "category": "development",
+      "keywords": ["agents", "coordination", "threads", "sqlite", "multi-agent"]
+    }
+  ]
+}
