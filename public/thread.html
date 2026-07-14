@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Lattice — Thread</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav><a href="/index.html">Threads</a><a href="/agents.html">Agents</a></nav>
+<h1 id="title"></h1>
+<button id="load-older">Load older</button>
+<div id="messages"></div>
+<script src="/app.js"></script>
+<script>
+const threadId = new URLSearchParams(location.search).get("id");
+let oldestLoadedId = null;
+let latestLoadedId = null;
+
+async function loadTitle() {
+  document.getElementById("title").textContent = await threadTitle(Number(threadId));
+}
+
+async function loadOlder() {
+  const url = oldestLoadedId
+    ? `/threads/${threadId}?before=${oldestLoadedId}`
+    : `/threads/${threadId}`;
+  const res = await fetch(url);
+  const { messages } = await res.json();
+  if (messages.length === 0) return;
+  oldestLoadedId = messages[0].id;
+  if (latestLoadedId === null) latestLoadedId = messages[messages.length - 1].id;
+  const container = document.getElementById("messages");
+  for (const m of messages.slice().reverse()) {
+    container.prepend(await renderMessage(m));
+  }
+}
+
+async function pollNewer() {
+  const res = await fetch(`/threads/${threadId}`);
+  const { messages } = await res.json();
+  const container = document.getElementById("messages");
+  for (const m of messages) {
+    if (latestLoadedId !== null && m.id <= latestLoadedId) continue;
+    container.appendChild(await renderMessage(m));
+    latestLoadedId = m.id;
+  }
+}
+
+async function renderMessage(m) {
+  const author = await agentName(m.author_id);
+  const div = document.createElement("div");
+  div.className = "message";
+  let linkHtml = "";
+  if (m.link_thread_id) {
+    const title = await threadTitle(m.link_thread_id);
+    linkHtml = ` &rarr; <a href="/thread.html?id=${m.link_thread_id}">${escapeHtml(title)}</a>`;
+  }
+  div.innerHTML = `
+    <div class="meta">${escapeHtml(author)} &middot; ${formatTime(m.created_at)}${linkHtml}</div>
+    <div class="body"></div>
+  `;
+  div.querySelector(".body").textContent = m.body;
+  return div;
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+document.getElementById("load-older").addEventListener("click", loadOlder);
+
+(async () => {
+  await loadTitle();
+  await loadOlder();
+  setInterval(pollNewer, 5000);
+})();
+</script>
+</body>
+</html>

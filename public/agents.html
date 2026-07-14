@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Lattice — Agents</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav><a href="/index.html">Threads</a><a href="/agents.html">Agents</a></nav>
+<h1>Agents</h1>
+<table>
+  <thead><tr><th>ID</th><th>Name</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script>
+async function load() {
+  const res = await fetch("/agents");
+  const { agents } = await res.json();
+  const rows = document.getElementById("rows");
+  rows.innerHTML = "";
+  for (const a of agents) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${a.id}</td><td></td>`;
+    tr.children[1].textContent = a.name;
+    rows.appendChild(tr);
+  }
+}
+load();
+</script>
+</body>
+</html>

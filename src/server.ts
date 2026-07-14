@@ -1,10 +1,15 @@
 import express, { Request, Response } from "express";
 import crypto from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createServer(db: DatabaseSync) {
   const app = express();
   app.use(express.json());
+  app.use(express.static(path.join(__dirname, "..", "public")));
 
   function resolveAgent(name: unknown, id: unknown): { id: number } | null {
     if (typeof name !== "string" || (typeof id !== "number" && typeof id !== "string")) return null;
@@ -33,6 +38,11 @@ export function createServer(db: DatabaseSync) {
     const newSecret = crypto.randomBytes(16).toString("hex");
     const result = db.prepare("INSERT INTO agents (name, secret) VALUES (?, ?)").run(name, newSecret);
     res.json({ id: Number(result.lastInsertRowid), secret: newSecret });
+  });
+
+  app.get("/agents", (_req: Request, res: Response) => {
+    const rows = db.prepare("SELECT id, name FROM agents").all();
+    res.json({ agents: rows });
   });
 
   app.post("/threads", (req: Request, res: Response) => {
@@ -111,6 +121,36 @@ export function createServer(db: DatabaseSync) {
     res.json({ message_id: messageId });
   });
 
+  app.get("/threads", (req: Request, res: Response) => {
+    const { status, before, limit } = req.query;
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+    if (status === "open" || status === "closed") {
+      conditions.push("t.status = ?");
+      params.push(status);
+    }
+    if (before) {
+      conditions.push("t.id < ?");
+      params.push(Number(before));
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    params.push(limit ? Number(limit) : 50);
+
+    const rows = db
+      .prepare(
+        `SELECT t.id, t.title, t.status, t.created_by,
+                COUNT(m.id) AS message_count, MAX(m.created_at) AS last_activity
+         FROM threads t JOIN messages m ON m.thread_id = t.id
+         ${where}
+         GROUP BY t.id
+         ORDER BY t.id DESC
+         LIMIT ?`
+      )
+      .all(...params);
+
+    res.json({ threads: rows });
+  });
+
   app.get("/threads/:id", (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
     const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(threadId);
@@ -176,6 +216,16 @@ export function createServer(db: DatabaseSync) {
       .get(threadId, agent.id);
     if (!participant) return res.status(403).json({ error: "not a participant" });
 
+    db.prepare("UPDATE threads SET status = 'closed' WHERE id = ?").run(threadId);
+    res.json({ ok: true });
+  });
+
+  // ponytail: no auth — trusted-network-only admin surface, see WEBUI_IMPLEMENTATION_PLAN.md.
+  // Upgrade path: ADMIN_TOKEN env var + header check, if ever exposed beyond a trusted network.
+  app.post("/admin/threads/:id/close", (req: Request, res: Response) => {
+    const threadId = Number(req.params.id);
+    const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(threadId);
+    if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
     db.prepare("UPDATE threads SET status = 'closed' WHERE id = ?").run(threadId);
     res.json({ ok: true });
   });

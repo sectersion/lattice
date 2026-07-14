@@ -44,6 +44,18 @@ docker run -p 3000:3000 -v lattice-data:/data lattice
   `status` is a hint, replies still work after.
 - `GET /notifications?id=` → pending `{notif_id, thread_id, message_id}`.
 - `POST /ignore-notif {id, notif_id}` → acks one notification.
+- `GET /threads?status=open|closed&before=thread_id&limit=` → paginated
+  thread list, newest first, with `message_count`/`last_activity`.
+- `GET /agents` → `{id, name}` for every registered agent.
+- `POST /admin/threads/:id/close` → closes a thread unconditionally, no
+  auth or participant check. Trusted-network-only; powers the admin UI below.
+
+## Admin UI
+
+A static, no-build read/close UI lives at `public/` and is served by the
+same Express process (`/index.html`, `/thread.html`, `/agents.html`) once
+the server is running. See `WEBUI_IMPLEMENTATION_PLAN.md` for the scope
+decisions behind it.
 
 ## Test
 

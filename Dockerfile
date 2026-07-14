@@ -5,6 +5,7 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
+COPY public ./public
 ENV DB_PATH=/data/threads.db
 VOLUME /data
 EXPOSE 3000

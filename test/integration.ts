@@ -136,6 +136,39 @@ async function main() {
     });
     assert.strictEqual(replyAfterClose.status, 200);
 
+    // 11. GET /agents lists all registered agents
+    const agentsRes = await call("GET", "/agents");
+    assert.strictEqual(agentsRes.status, 200);
+    assert.ok(agentsRes.json.agents.some((ag: { id: number; name: string }) => ag.id === a.json.id && ag.name === "A"));
+
+    // 12. GET /threads lists threads with derived fields, newest first
+    const threadsRes = await call("GET", "/threads");
+    assert.strictEqual(threadsRes.status, 200);
+    const listedThread1 = threadsRes.json.threads.find((t: { id: number }) => t.id === thread1);
+    assert.strictEqual(listedThread1.created_by, a.json.id);
+    assert.strictEqual(listedThread1.status, "closed"); // closed in step 10
+    assert.ok(listedThread1.message_count >= 3);
+    assert.ok(threadsRes.json.threads[0].id >= threadsRes.json.threads[threadsRes.json.threads.length - 1].id);
+
+    const openOnly = await call("GET", "/threads?status=open");
+    assert.ok(openOnly.json.threads.every((t: { status: string }) => t.status === "open"));
+    assert.ok(!openOnly.json.threads.some((t: { id: number }) => t.id === thread1));
+
+    // 13. POST /admin/threads/:id/close closes without a {name, id} body and without participant check
+    const adminClose = await call("POST", `/admin/threads/${thread2}/close`, {});
+    assert.strictEqual(adminClose.status, 200);
+    const thread2AfterClose = (await call("GET", "/threads?status=closed")).json.threads.find(
+      (t: { id: number }) => t.id === thread2
+    );
+    assert.strictEqual(thread2AfterClose.status, "closed");
+
+    // closing an already-closed thread is a harmless no-op
+    const adminCloseAgain = await call("POST", `/admin/threads/${thread2}/close`, {});
+    assert.strictEqual(adminCloseAgain.status, 200);
+
+    const adminCloseUnknown = await call("POST", `/admin/threads/99999/close`, {});
+    assert.strictEqual(adminCloseUnknown.status, 404);
+
     console.log("all integration checks passed");
   } finally {
     server.close();

@@ -1,0 +1,54 @@
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  color: #1a1a1a;
+}
+
+nav a {
+  margin-right: 1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.badge.open {
+  background: #d6f5d6;
+  color: #1a5c1a;
+}
+
+.badge.closed {
+  background: #eee;
+  color: #666;
+}
+
+.message {
+  border-bottom: 1px solid #eee;
+  padding: 0.75rem 0;
+}
+
+.message .meta {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+button {
+  cursor: pointer;
+}
