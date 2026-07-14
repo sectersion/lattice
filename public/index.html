@@ -15,6 +15,7 @@
     <option value="closed">Closed</option>
   </select>
 </label>
+<label>Search: <input type="search" id="search" placeholder="title contains..."></label>
 <table>
   <thead>
     <tr><th>Title</th><th>Status</th><th>Author</th><th>Messages</th><th>Last activity</th><th></th></tr>
@@ -25,8 +26,12 @@
 <script>
 async function load() {
   const status = document.getElementById("filter").value;
-  const url = status ? `/threads?status=${status}` : "/threads";
-  const res = await fetch(url);
+  const title = document.getElementById("search").value.trim();
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (title) params.set("title", title);
+  const qs = params.toString();
+  const res = await fetch(qs ? `/threads?${qs}` : "/threads");
   const { threads } = await res.json();
   const rows = document.getElementById("rows");
   rows.innerHTML = "";
@@ -45,7 +50,7 @@ async function load() {
   }
   for (const btn of rows.querySelectorAll(".close-btn")) {
     btn.addEventListener("click", async () => {
-      await fetch(`/admin/threads/${btn.dataset.id}/close`, { method: "POST" });
+      await adminFetch(`/admin/threads/${btn.dataset.id}/close`, { method: "POST" });
       load();
     });
   }
@@ -58,6 +63,11 @@ function escapeHtml(s) {
 }
 
 document.getElementById("filter").addEventListener("change", load);
+let searchDebounce;
+document.getElementById("search").addEventListener("input", () => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(load, 300);
+});
 load();
 setInterval(load, 5000);
 </script>

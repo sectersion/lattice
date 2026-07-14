@@ -22,3 +22,16 @@ async function threadTitle(id) {
 function formatTime(ms) {
   return new Date(ms).toLocaleString();
 }
+
+// ponytail: admin token is optional (server only enforces it if ADMIN_TOKEN
+// is set); prompt lazily on first 401 rather than always asking for one.
+async function adminFetch(url, opts = {}) {
+  let token = localStorage.getItem("lattice_admin_token") ?? "";
+  let res = await fetch(url, { ...opts, headers: { authorization: `Bearer ${token}` } });
+  if (res.status === 401) {
+    token = prompt("Admin token required:") ?? "";
+    localStorage.setItem("lattice_admin_token", token);
+    res = await fetch(url, { ...opts, headers: { authorization: `Bearer ${token}` } });
+  }
+  return res;
+}
