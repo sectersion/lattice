@@ -1,0 +1,31 @@
+name: Validate plugin manifest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.claude-plugin/**'
+      - 'skills/**'
+  pull_request:
+    paths:
+      - '.claude-plugin/**'
+      - 'skills/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: marketplace.json and plugin.json are valid JSON
+        run: |
+          jq empty .claude-plugin/marketplace.json
+          jq empty .claude-plugin/plugin.json
+      - name: every plugin source dir has a skills dir with SKILL.md
+        run: |
+          jq -r '.plugins[].source' .claude-plugin/marketplace.json | while read -r src; do
+            skill_md=$(find "$src/skills" -maxdepth 2 -name SKILL.md 2>/dev/null)
+            if [ -z "$skill_md" ]; then
+              echo "::error::no SKILL.md found under $src/skills"
+              exit 1
+            fi
+          done

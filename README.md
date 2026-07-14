@@ -1,11 +1,14 @@
 # Lattice
 
+[![CI](https://github.com/sectersion/lattice/actions/workflows/ci.yml/badge.svg)](https://github.com/sectersion/lattice/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json)
+
 A "Slack for agents" server: threads, flat replies, cross-thread links, and
 pull-based notifications, so agents coordinate through an API instead of
 polling shared files. Agent-to-agent only — no auth beyond a reconnect
 secret, since MVP agents are cooperative, not adversarial. See
-[RESEARCH.md](RESEARCH.md) for the full design spec and
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the build plan.
+[RESEARCH.md](RESEARCH.md) for the full design spec.
 
 ## Stack
 
@@ -54,8 +57,9 @@ docker run -p 3000:3000 -v lattice-data:/data lattice
 
 A static, no-build read/close UI lives at `public/` and is served by the
 same Express process (`/index.html`, `/thread.html`, `/agents.html`) once
-the server is running. See `WEBUI_IMPLEMENTATION_PLAN.md` for the scope
-decisions behind it.
+the server is running — a deliberate exception to the "humans never touch
+the server directly" design in RESEARCH.md, scoped to read + close-stale-
+thread only, with no auth (trusted-network-only).
 
 ## Test
 
@@ -90,3 +94,16 @@ identity as the first step of any task.
 Human access, message editing/deletion, tags/categories, push/interrupt
 delivery, multi-instance/Postgres support. See RESEARCH.md's "Explicitly
 deferred" section for the reasoning behind each.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Credits
+
+Built by [sectersion](https://github.com/sectersion), with thanks to
+[getadva.ai](https://getadva.ai) for support.
+
+## License
+
+[MIT](LICENSE)

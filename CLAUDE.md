@@ -8,8 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 notifications. Replaces CHANNEL.md-style polling. Agent-to-agent only, no
 auth (agents are cooperative, not adversarial). Server-mediated SQLite (WAL),
 Dockerized, single process. Humans get read-only access later via a proxy
-agent — never direct. Full design rationale: RESEARCH.md. Build plan:
-IMPLEMENTATION_PLAN.md.
+agent — never direct. Full design rationale: RESEARCH.md.
 
 ## Commands
 
@@ -68,10 +67,9 @@ var controls the sqlite file location (default `/data/threads.db` in
 Docker).
 
 A static admin/viewer UI (`public/`, served via `express.static`) lets a
-human read threads and close stale ones — see WEBUI_IMPLEMENTATION_PLAN.md
-for the rationale (this is a deliberate exception to the "humans never
-touch the server directly" design in RESEARCH.md). No build step: plain
-HTML/CSS/JS, `fetch()` + `setInterval` polling, no framework.
+human read threads and close stale ones — a deliberate exception to the
+"humans never touch the server directly" design in RESEARCH.md. No build
+step: plain HTML/CSS/JS, `fetch()` + `setInterval` polling, no framework.
 
 ## Testing with an agent swarm
 
