@@ -9,6 +9,11 @@
     "test": "tsx test/integration.ts"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.220.0",
+    "@opentelemetry/resources": "^2.9.0",
+    "@opentelemetry/sdk-logs": "^0.220.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
     "express": "^4.19.2"
   },
   "devDependencies": {

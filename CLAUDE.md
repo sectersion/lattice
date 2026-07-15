@@ -71,6 +71,20 @@ human read threads and close stale ones — a deliberate exception to the
 "humans never touch the server directly" design in RESEARCH.md. No build
 step: plain HTML/CSS/JS, `fetch()` + `setInterval` polling, no framework.
 
+## Observability
+
+`src/otel.ts` ships every structured log line (`log()` request/error logs
+and the `audit()` accountability events from server.ts) to an OTel
+collector via OTLP, in addition to stdout and `audit.jsonl`. Logs only — no
+traces/metrics, since the target backend is Loki (a log store; add
+traces/metrics if a Prometheus/Mimir backend shows up later). Off by
+default: set `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` (or
+`OTEL_EXPORTER_OTLP_ENDPOINT`) to a Loki OTLP endpoint (e.g.
+`http://loki:3100/otlp/v1/logs`) to enable; `OTEL_SERVICE_NAME` overrides
+the `service.name` resource attribute (default `lattice`). Export failures
+(collector unreachable) are swallowed by the batch processor and never
+affect request handling.
+
 ## Testing with an agent swarm
 
 To validate this as a real multi-agent system (not just the single

@@ -1,5 +1,8 @@
 import { openDb } from "./db.js";
 import { createServer, log } from "./server.js";
+import { initOtel } from "./otel.js";
+
+initOtel();
 
 const dbPath = process.env.DB_PATH ?? "/data/threads.db";
 const port = Number(process.env.PORT ?? 3000);

@@ -3,11 +3,30 @@ import crypto from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { emitOtelLog } from "./otel.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function log(fields: Record<string, unknown>) {
   console.log(JSON.stringify({ ts: new Date().toISOString(), ...fields }));
+  emitOtelLog(fields);
+}
+
+// ponytail: single append-only file, not one-per-month — lattice's write
+// volume doesn't warrant rotation. Upgrade path: split by date if the file
+// gets unwieldy.
+export function makeAuditLog(dbPath: string) {
+  const auditPath = path.join(path.dirname(dbPath), "audit.jsonl");
+  return function audit(fields: Record<string, unknown>) {
+    try {
+      mkdirSync(path.dirname(auditPath), { recursive: true });
+      appendFileSync(auditPath, JSON.stringify({ ts: new Date().toISOString(), ...fields }) + "\n");
+    } catch (err) {
+      log({ level: "error", message: "audit log write failed", error: String(err) });
+    }
+    emitOtelLog({ message: "audit", ...fields });
+  };
 }
 
 // ponytail: fixed-window counter, per process, not per cluster node — fine
@@ -34,6 +53,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   const app = express();
   const startedAt = Date.now();
   const adminToken = process.env.ADMIN_TOKEN;
+  const audit = makeAuditLog(dbPath);
   app.use(express.json());
   app.use((req: Request, _res: Response, next) => {
     log({ method: req.method, url: req.originalUrl });
@@ -67,6 +87,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
     const newSecret = crypto.randomBytes(16).toString("hex");
     const result = db.prepare("INSERT INTO agents (name, secret) VALUES (?, ?)").run(name, newSecret);
+    audit({ action: "register", agent_id: Number(result.lastInsertRowid), name });
     res.json({ id: Number(result.lastInsertRowid), secret: newSecret });
   });
 
@@ -99,6 +120,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       agent.id
     );
 
+    audit({ action: "create_thread", agent_id: agent.id, thread_id: threadId, message_id: Number(msgResult.lastInsertRowid) });
     res.json({ thread_id: threadId, message_id: Number(msgResult.lastInsertRowid) });
   });
 
@@ -149,6 +171,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       }
     }
 
+    audit({ action: "reply", agent_id: agent.id, thread_id: threadId, message_id: messageId, link_thread_id: linkId });
     res.json({ message_id: messageId });
   });
 
@@ -225,6 +248,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       Number(thread_id),
       agent.id
     );
+    audit({ action: "subscribe", agent_id: agent.id, thread_id: Number(thread_id) });
     res.json({ ok: true });
   });
 
@@ -236,6 +260,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       Number(thread_id),
       agent.id
     );
+    audit({ action: "unsubscribe", agent_id: agent.id, thread_id: Number(thread_id) });
     res.json({ ok: true });
   });
 
@@ -255,6 +280,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     if (!participant) return res.status(403).json({ error: "not a participant" });
 
     db.prepare("UPDATE threads SET status = 'closed' WHERE id = ?").run(threadId);
+    audit({ action: "close_thread", agent_id: agent.id, thread_id: threadId });
     res.json({ ok: true });
   });
 
@@ -267,6 +293,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(threadId);
     if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
     db.prepare("UPDATE threads SET status = 'closed' WHERE id = ?").run(threadId);
+    audit({ action: "admin_close_thread", thread_id: threadId });
     res.json({ ok: true });
   });
 
@@ -313,6 +340,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     }
     const newSecret = crypto.randomBytes(16).toString("hex");
     db.prepare("UPDATE agents SET secret = ? WHERE id = ?").run(newSecret, row.id);
+    audit({ action: "rotate_secret", agent_id: row.id });
     res.json({ secret: newSecret });
   });
 
