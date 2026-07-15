@@ -86,7 +86,15 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     }
 
     const newSecret = crypto.randomBytes(16).toString("hex");
-    const result = db.prepare("INSERT INTO agents (name, secret) VALUES (?, ?)").run(name, newSecret);
+    let result;
+    try {
+      result = db.prepare("INSERT INTO agents (name, secret) VALUES (?, ?)").run(name, newSecret);
+    } catch (err: any) {
+      if (String(err?.message).includes("UNIQUE constraint failed")) {
+        return res.status(409).json({ error: "name taken" });
+      }
+      throw err;
+    }
     audit({ action: "register", agent_id: Number(result.lastInsertRowid), name });
     res.json({ id: Number(result.lastInsertRowid), secret: newSecret });
   });

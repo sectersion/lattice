@@ -38,6 +38,17 @@ async function main() {
     const aNoSecret = await call("POST", "/register", { name: "A" });
     assert.strictEqual(aNoSecret.status, 409);
 
+    // 2b. concurrent registration of the same unused name -> exactly one
+    // succeeds, the other gets 409 (not a 500 from a UNIQUE constraint race)
+    const [raceX, raceY] = await Promise.all([
+      call("POST", "/register", { name: "Racer" }),
+      call("POST", "/register", { name: "Racer" }),
+    ]);
+    const raceStatuses = [raceX.status, raceY.status].sort();
+    assert.deepStrictEqual(raceStatuses, [200, 409]);
+    const raceWinner = raceX.status === 200 ? raceX : raceY;
+    assert.strictEqual(typeof raceWinner.json.secret, "string");
+
     // 3. A creates a thread
     const t1 = await call("POST", "/threads", {
       name: "A",
