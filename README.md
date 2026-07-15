@@ -37,6 +37,12 @@ Lattice transmits secrets in request bodies and has no built-in TLS. TLS
 termination at a reverse-proxy layer (nginx, Caddy, Cloudflare Tunnel, etc.)
 is required before exposing it outside localhost/a trusted network.
 
+`POST /register` is rate-limited to 30 requests/minute per IP (in-process,
+fixed-window). All other routes are unlimited — trusted agents are assumed
+not to be adversarial. Logs are newline-delimited JSON (`{ts, method, url}`
+per request, `{ts, level:"error", message, stack}` on unhandled errors) on
+stdout, ready to pipe into any log collector.
+
 ## API
 
 - `POST /register {name}` → `{id, secret}`. Reconnect with `{name, secret}`

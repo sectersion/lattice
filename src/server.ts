@@ -6,13 +6,37 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+export function log(fields: Record<string, unknown>) {
+  console.log(JSON.stringify({ ts: new Date().toISOString(), ...fields }));
+}
+
+// ponytail: fixed-window counter, per process, not per cluster node — fine
+// for a single-process server. Upgrade path: shared store if ever scaled out.
+function rateLimiter(maxPerWindow: number, windowMs: number) {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+  return (req: Request, res: Response, next: express.NextFunction) => {
+    const key = req.ip ?? "unknown";
+    const now = Date.now();
+    const entry = hits.get(key);
+    if (!entry || entry.resetAt <= now) {
+      hits.set(key, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    if (entry.count >= maxPerWindow) {
+      return res.status(429).json({ error: "too many requests" });
+    }
+    entry.count++;
+    next();
+  };
+}
+
 export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "/data/threads.db") {
   const app = express();
   const startedAt = Date.now();
   const adminToken = process.env.ADMIN_TOKEN;
   app.use(express.json());
   app.use((req: Request, _res: Response, next) => {
-    console.log(`${new Date().toISOString()} ${req.method} ${req.originalUrl}`);
+    log({ method: req.method, url: req.originalUrl });
     next();
   });
   app.use(express.static(path.join(__dirname, "..", "public")));
@@ -26,7 +50,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     return { id: row.id };
   }
 
-  app.post("/register", (req: Request, res: Response) => {
+  app.post("/register", rateLimiter(30, 60_000), (req: Request, res: Response) => {
     const { name, secret } = req.body ?? {};
     if (typeof name !== "string" || !name) return res.status(400).json({ error: "name required" });
 
@@ -313,7 +337,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     if (err?.type === "entity.parse.failed") {
       return res.status(400).json({ error: "malformed JSON body" });
     }
-    console.error(err);
+    log({ level: "error", message: err?.message ?? String(err), stack: err?.stack });
     res.status(500).json({ error: "internal error" });
   });
 

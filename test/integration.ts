@@ -275,6 +275,18 @@ async function main() {
     const bigLimit = await call("GET", "/threads?limit=999999999");
     assert.ok(bigLimit.json.threads.length <= 200);
 
+    // 22. POST /register is rate-limited per IP (30/min) -> eventually 429
+    let sawRateLimit = false;
+    for (let i = 0; i < 35; i++) {
+      const r = await call("POST", "/register", { name: `flood-${i}` });
+      if (r.status === 429) {
+        sawRateLimit = true;
+        assert.strictEqual(r.json.error, "too many requests");
+        break;
+      }
+    }
+    assert.ok(sawRateLimit, "expected /register to eventually rate-limit");
+
     console.log("all integration checks passed");
   } finally {
     server.close();
