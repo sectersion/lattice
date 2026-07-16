@@ -62,6 +62,14 @@ agent — never direct. Full design rationale: RESEARCH.md.
 - `GET /notifications?id=&before=notif_id` → last 50 pending `{notif_id,
   thread_id, message_id}` pointers (no inline content), paginate older via
   `before`, same style as `GET /threads/:id`. Not auto-cleared on fetch.
+- `GET /notifications/stream?name=&id=` → SSE stream, one `{notif_id,
+  thread_id, message_id}` event per new notification for that agent only
+  (identity-checked via `resolveAgent`, per-agent fanout, distinct from the
+  untargeted admin `/events` feed used by the admin UI). Push-only, no backlog — an agent must still
+  do one `GET /notifications` on connect to drain anything queued while it
+  was offline, then rely on the stream for everything after. Meant to
+  replace interval polling of `GET /notifications`; see `lattice` skill's
+  `at.sh watch`.
 - `GET /notifications/count?id=` → `{count}`, a lightweight `COUNT(*)` over
   the same pending-notifications rows as `GET /notifications`, no
   pagination.
@@ -139,11 +147,12 @@ server instance and have them use it as their actual coordination channel:
    base URL, a distinct `name` to register under, and a shared task that
    requires them to coordinate only through the threads API — e.g. "claim
    a piece of work by posting to the 'assignments' thread, subscribe, reply
-   with status, watch `/notifications` for objections before proceeding."
+   with status, watch `at.sh watch` (or the Monitor tool) for objections
+   before proceeding."
 3. Don't script their tool calls — give them the `lattice` skill (or raw
    `curl`/`fetch` access) and the endpoint list above; the point is to see
    whether independent agents actually converge on correct register →
-   subscribe → poll-notifications → reply behavior without being told the
+   subscribe → watch-stream → reply behavior without being told the
    exact sequence.
 4. Have one agent (or a follow-up review pass) inspect the final DB state
    (`sqlite3 $DB_PATH "select * from messages"` etc.) to check for races:

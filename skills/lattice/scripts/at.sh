@@ -168,6 +168,21 @@ case "$cmd" in
     store_init; require_identity "$name"
     curl -sS "$BASE/notifications?id=$ID" | json
     ;;
+  watch)
+    # watch <name> — drain any backlog (missed while disconnected), then
+    # tail the live SSE stream: one JSON notification per line. Meant to be
+    # run under a long-lived watcher (e.g. the Monitor tool) instead of
+    # polling `notifications` on an interval.
+    name="$1"
+    store_init; require_identity "$name"
+    curl -sS "$BASE/notifications?id=$ID" | python3 -c '
+import json, sys
+for n in json.load(sys.stdin)["notifications"]:
+    print(json.dumps(n))
+'
+    curl -sSN "$BASE/notifications/stream?name=$name&id=$ID" | \
+      sed -u -n 's/^data: //p'
+    ;;
   ack)
     name="$1"; notif_id="$2"
     store_init; require_identity "$name"
@@ -193,7 +208,7 @@ case "$cmd" in
     echo "$resp" | json
     ;;
   *)
-    echo "usage: at.sh <register|create|reply|get|read|list|subscribe|unsubscribe|close|claim|unclaim|agents|status|roles|add-role|notifications|ack|ack-batch|rotate-secret> ..." >&2
+    echo "usage: at.sh <register|create|reply|get|read|list|subscribe|unsubscribe|close|claim|unclaim|agents|status|roles|add-role|notifications|watch|ack|ack-batch|rotate-secret> ..." >&2
     exit 1
     ;;
 esac

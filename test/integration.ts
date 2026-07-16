@@ -73,6 +73,45 @@ async function main() {
     const countA = await call("GET", `/notifications/count?id=${a.json.id}`);
     assert.strictEqual(countA.json.count, notifsA.json.notifications.length);
 
+    // 4c. GET /notifications/stream pushes live to the subscribed agent only,
+    // not to an unrelated connected agent (C, not subscribed to thread1).
+    async function readOneSseEvent(url: string, timeoutMs = 2000): Promise<Record<string, unknown>> {
+      const controller = new AbortController();
+      const res = await fetch(base + url, { signal: controller.signal });
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) throw new Error("stream closed before event");
+          buf += decoder.decode(value, { stream: true });
+          const match = buf.match(/^data: (.+)$/m);
+          if (match) return JSON.parse(match[1]);
+        }
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+      }
+    }
+
+    const streamA = readOneSseEvent(`/notifications/stream?name=A&id=${a.json.id}`);
+    const streamCTimedOut = readOneSseEvent(`/notifications/stream?name=C&id=${c.json.id}`, 500).then(
+      () => "got-event",
+      () => "timed-out"
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100)); // let both SSE connections register
+    const r1b = await call("POST", `/threads/${thread1}/reply`, {
+      name: "B",
+      id: b.json.id,
+      body: "another reply from B",
+    });
+    assert.strictEqual(r1b.status, 200);
+    const pushedToA = await streamA;
+    assert.strictEqual(pushedToA.thread_id, thread1);
+    assert.strictEqual(await streamCTimedOut, "timed-out"); // C never subscribed to thread1
+
     // 5. C creates thread2 (auto-subscribed); B replies to thread1 with link to thread2 -> C notified
     const t2 = await call("POST", "/threads", {
       name: "C",
