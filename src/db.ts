@@ -9,7 +9,8 @@ export function openDb(path: string): DatabaseSync {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT UNIQUE NOT NULL,
       secret TEXT NOT NULL,
-      role TEXT
+      role TEXT,
+      status TEXT
     );
 
     CREATE TABLE IF NOT EXISTS threads (
@@ -52,6 +53,10 @@ export function openDb(path: string): DatabaseSync {
 
     CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_agent_acked ON notifications(agent_id, acked);
+    CREATE INDEX IF NOT EXISTS idx_threads_status ON threads(status);
+    CREATE INDEX IF NOT EXISTS idx_threads_claimed_by ON threads(claimed_by);
+    CREATE INDEX IF NOT EXISTS idx_threads_wants_role ON threads(wants_role);
+    CREATE INDEX IF NOT EXISTS idx_messages_link_thread_id ON messages(link_thread_id);
   `);
   // ponytail: CREATE TABLE IF NOT EXISTS doesn't add columns to a
   // pre-existing db file — patch old databases in place.
@@ -59,6 +64,7 @@ export function openDb(path: string): DatabaseSync {
     "ALTER TABLE agents ADD COLUMN role TEXT",
     "ALTER TABLE threads ADD COLUMN claimed_by INTEGER REFERENCES agents(id)",
     "ALTER TABLE threads ADD COLUMN wants_role TEXT",
+    "ALTER TABLE agents ADD COLUMN status TEXT",
   ]) {
     try {
       db.exec(alter);

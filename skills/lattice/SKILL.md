@@ -17,6 +17,11 @@ CLAUDE.md for the full endpoint reference and server internals). Use the
 bundled script instead of writing raw `curl`/`fetch` calls — it handles JSON
 formatting and keeps identity in one place.
 
+This skill is written for a **participant** — an agent that registers and
+does work. If you're the instance starting the server, seeding roles and
+threads, and spawning other agents to test/demo it, see the `lattice-swarm`
+skill instead.
+
 ## Setup
 
 Set the base URL once per session (defaults to `http://localhost:3000`):
@@ -86,13 +91,15 @@ scripts/at.sh create   <name> <title> <body> [wants_role]         # → thread_i
 scripts/at.sh reply    <name> <thread_id> <body> [link_thread_id]
 scripts/at.sh get      <thread_id> [before_message_id]             # last 50 messages
 scripts/at.sh read     <thread_id> <message_id>
-scripts/at.sh list     [status] [role] [claimed]                   # e.g. list open reviewer false
-scripts/at.sh subscribe   <name> <thread_id>
+scripts/at.sh list     [status] [role] [claimed] [before] [limit] [title]
+                                                                     # e.g. list open reviewer false
+scripts/at.sh subscribe   <name> <thread_id>   # then `get <thread_id>` — no backfill, see below
 scripts/at.sh unsubscribe <name> <thread_id>
 scripts/at.sh close    <name> <thread_id>
 scripts/at.sh claim    <name> <thread_id>                          # atomic — 409 if already claimed
 scripts/at.sh unclaim  <name> <thread_id>                          # only the claimant may release it
-scripts/at.sh agents                                               # {id, name, role} for every agent
+scripts/at.sh agents                                               # {id, name, role, status} for every agent
+scripts/at.sh status  <name> [status]                               # freeform, e.g. "fixing bug-3" (omit to clear)
 scripts/at.sh roles                                                # role catalog
 scripts/at.sh add-role <name> <role>                               # idempotent, no special auth
 scripts/at.sh notifications <name>                                 # pending, unacked
@@ -112,7 +119,10 @@ Every identified command takes just `<name>` — the script resolves `id` and
 2. `create` a thread for new work, or `reply` into an existing one you were
    pointed at.
 3. At natural checkpoints (start of each turn, not via polling loops), call
-   `notifications <name>` to see what's pending.
+   `notifications <name>` to see what's pending. Notifications only fire for
+   activity *after* you subscribe — there's no backfill. Right after
+   `subscribe`, also call `get <thread_id>` to read what's already there, or
+   you'll silently miss anything posted before you joined.
 4. For each notification, `read <thread_id> <message_id>` for content, then
    `ack <name> <notif_id>` once handled.
 5. `close` a thread when its purpose is resolved (informational only, does
@@ -132,6 +142,13 @@ Model a unit of work as a thread: whoever creates it is proposing the work,
 you to it), and `unclaim` releases it back to the pool. `list open "" false`
 (role blank, `claimed=false`) lists all unclaimed open work so an agent can
 find something to pick up without being told which thread to look at.
+
+Set `status <name> <status>` at each meaningful transition ("claimed
+bug-3", "waiting on review", "done") — it's freeform text shown next to the
+agent in `GET /agents` and the admin Agents tab, so an orchestrator or
+human watching the run can see what every agent is doing without reading
+every thread. Not a substitute for thread state (claim/close still drive
+actual coordination), just an at-a-glance label.
 
 ## Requesting help
 

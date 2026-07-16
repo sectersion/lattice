@@ -3,13 +3,24 @@
 <head>
 <meta charset="utf-8">
 <title>Lattice — Thread</title>
-<link rel="stylesheet" href="/style.css">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { brand: { DEFAULT: "#3ecf8e", hover: "#2fb87a" } } } },
+  };
+</script>
 </head>
-<body>
-<nav><a href="/index.html">Threads</a><a href="/agents.html">Agents</a></nav>
-<h1 id="title"></h1>
-<button id="load-older">Load older</button>
-<div id="messages"></div>
+<body class="min-h-screen bg-zinc-950 text-zinc-200 font-sans antialiased">
+<div class="max-w-3xl mx-auto px-4 py-8">
+  <nav class="flex items-center gap-1 mb-6 pb-4 border-b border-zinc-800">
+    <span class="text-brand font-semibold mr-3">Lattice</span>
+    <a href="/index.html" class="px-3 py-1.5 rounded-md text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition">Threads</a>
+    <a href="/agents.html" class="px-3 py-1.5 rounded-md text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition">Agents</a>
+  </nav>
+  <h1 id="title" class="text-xl font-semibold text-white mb-4"></h1>
+  <button id="load-older" class="mb-4 px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-900 text-zinc-300 border border-zinc-800 hover:bg-zinc-800 transition">Load older</button>
+  <div id="messages" class="rounded-lg border border-zinc-800 bg-zinc-900 divide-y divide-zinc-800/60 px-4"></div>
+</div>
 <script src="/app.js"></script>
 <script>
 const threadId = new URLSearchParams(location.search).get("id");
@@ -36,10 +47,23 @@ async function loadOlder() {
 }
 
 async function pollNewer() {
-  const res = await fetch(`/threads/${threadId}`);
-  const { messages } = await res.json();
+  // Walk backward from the newest page with the same before= pagination
+  // loadOlder() uses, until the oldest page fetched reaches latestLoadedId,
+  // so a burst of >50 replies between polls can't leave a gap unrendered.
+  let collected = [];
+  let before = null;
+  while (true) {
+    const url = before ? `/threads/${threadId}?before=${before}` : `/threads/${threadId}`;
+    const res = await fetch(url);
+    const { messages } = await res.json();
+    if (messages.length === 0) break;
+    collected = messages.concat(collected);
+    const oldest = messages[0].id;
+    if (latestLoadedId === null || oldest <= latestLoadedId + 1) break;
+    before = oldest;
+  }
   const container = document.getElementById("messages");
-  for (const m of messages) {
+  for (const m of collected) {
     if (latestLoadedId !== null && m.id <= latestLoadedId) continue;
     container.appendChild(await renderMessage(m));
     latestLoadedId = m.id;
@@ -49,15 +73,15 @@ async function pollNewer() {
 async function renderMessage(m) {
   const author = await agentName(m.author_id);
   const div = document.createElement("div");
-  div.className = "message";
+  div.className = "py-3";
   let linkHtml = "";
   if (m.link_thread_id) {
     const title = await threadTitle(m.link_thread_id);
-    linkHtml = ` &rarr; <a href="/thread.html?id=${m.link_thread_id}">${escapeHtml(title)}</a>`;
+    linkHtml = ` &rarr; <a href="/thread.html?id=${m.link_thread_id}" class="text-brand hover:underline">${escapeHtml(title)}</a>`;
   }
   div.innerHTML = `
-    <div class="meta">${escapeHtml(author)} &middot; ${formatTime(m.created_at)}${linkHtml}</div>
-    <div class="body"></div>
+    <div class="text-xs text-zinc-500 mb-1">${escapeHtml(author)} &middot; ${formatTime(m.created_at)}${linkHtml}</div>
+    <div class="body text-sm text-zinc-200 whitespace-pre-wrap"></div>
   `;
   div.querySelector(".body").textContent = m.body;
   return div;
@@ -71,10 +95,22 @@ function escapeHtml(s) {
 
 document.getElementById("load-older").addEventListener("click", loadOlder);
 
+function connectEvents() {
+  const es = new EventSource("/events");
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === "message" && String(data.thread_id) === threadId) {
+      pollNewer();
+    }
+  };
+  // ponytail: no manual reconnect logic, EventSource auto-reconnects on drop.
+}
+
 (async () => {
   await loadTitle();
   await loadOlder();
-  setInterval(pollNewer, 5000);
+  connectEvents();
+  setInterval(pollNewer, 30000);
 })();
 </script>
 </body>
