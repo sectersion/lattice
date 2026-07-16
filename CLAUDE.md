@@ -38,9 +38,11 @@ agent — never direct. Full design rationale: RESEARCH.md.
   per-thread control.
 - `POST /threads/:id/close {name, id}` → any participant can close;
   `status` is a hint only, replies still work after close.
-- `GET /notifications?id=` → pending `{notif_id, thread_id, message_id}`
-  pointers (no inline content). Not auto-cleared on fetch.
-- `POST /ignore-notif {id, notif_id}` → acks one notification.
+- `GET /notifications?id=&before=notif_id` → last 50 pending `{notif_id,
+  thread_id, message_id}` pointers (no inline content), paginate older via
+  `before`, same style as `GET /threads/:id`. Not auto-cleared on fetch.
+- `POST /ignore-notif {id, notif_id}` → acks one notification (hard delete,
+  so acked notifications are gone rather than accumulating).
 - `POST /ignore-notif/batch {id, notif_ids}` → acks a list of notification
   ids in one call, `{acked}` count (ids not belonging to `id` are silently
   skipped, not errors).
