@@ -133,6 +133,8 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     res.json({ agents: rows });
   });
 
+  const writeLimiter = rateLimiter(30, 60_000);
+
   app.post("/roles", (req: Request, res: Response) => {
     const { name, id, role } = req.body ?? {};
     const agent = resolveAgent(name, id);
@@ -153,7 +155,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     res.json({ roles: rows });
   });
 
-  app.post("/threads", (req: Request, res: Response) => {
+  app.post("/threads", writeLimiter, (req: Request, res: Response) => {
     const { name, id, title, body, wants_role } = req.body ?? {};
     const agent = resolveAgent(name, id);
     if (!agent) return res.status(400).json({ error: "unknown agent" });
@@ -162,6 +164,10 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     }
     if (wants_role !== undefined && wants_role !== null && typeof wants_role !== "string") {
       return res.status(400).json({ error: "wants_role must be a string" });
+    }
+    // Same rule as /register: only enforce membership once the catalog is seeded.
+    if (typeof wants_role === "string" && roleCatalogSize() > 0 && !roleExists(wants_role)) {
+      return res.status(400).json({ error: "unknown role, see GET /roles" });
     }
 
     const threadResult = db
@@ -184,7 +190,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     res.json({ thread_id: threadId, message_id: Number(msgResult.lastInsertRowid) });
   });
 
-  app.post("/threads/:id/reply", (req: Request, res: Response) => {
+  app.post("/threads/:id/reply", writeLimiter, (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
     if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
     const { name, id, body, link_thread_id } = req.body ?? {};
@@ -302,6 +308,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   app.get("/read", (req: Request, res: Response) => {
     const threadId = Number(req.query.thread_id);
     const messageId = Number(req.query.message_id);
+    if (!Number.isInteger(threadId) || !Number.isInteger(messageId)) {
+      return res.status(400).json({ error: "invalid thread_id or message_id" });
+    }
     const row = db
       .prepare("SELECT * FROM messages WHERE thread_id = ? AND id = ?")
       .get(threadId, messageId);
@@ -309,7 +318,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     res.json(row);
   });
 
-  app.post("/subscribe", (req: Request, res: Response) => {
+  app.post("/subscribe", writeLimiter, (req: Request, res: Response) => {
     const { name, id, thread_id } = req.body ?? {};
     const agent = resolveAgent(name, id);
     if (!agent) return res.status(400).json({ error: "unknown agent" });
@@ -321,7 +330,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     res.json({ ok: true });
   });
 
-  app.post("/unsubscribe", (req: Request, res: Response) => {
+  app.post("/unsubscribe", writeLimiter, (req: Request, res: Response) => {
     const { name, id, thread_id } = req.body ?? {};
     const agent = resolveAgent(name, id);
     if (!agent) return res.status(400).json({ error: "unknown agent" });
@@ -353,7 +362,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     res.json({ ok: true });
   });
 
-  app.post("/threads/:id/claim", (req: Request, res: Response) => {
+  app.post("/threads/:id/claim", writeLimiter, (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
     if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
     const { name, id } = req.body ?? {};
@@ -380,7 +389,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     res.json({ ok: true });
   });
 
-  app.post("/threads/:id/unclaim", (req: Request, res: Response) => {
+  app.post("/threads/:id/unclaim", writeLimiter, (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
     if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
     const { name, id } = req.body ?? {};
@@ -413,7 +422,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
   app.get("/notifications", (req: Request, res: Response) => {
     const agentId = Number(req.query.id);
+    if (!Number.isInteger(agentId)) return res.status(400).json({ error: "invalid id" });
     const before = req.query.before ? Number(req.query.before) : null;
+    if (before !== null && !Number.isInteger(before)) return res.status(400).json({ error: "invalid before" });
     const rows = before
       ? db
           .prepare(
@@ -428,23 +439,27 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     res.json({ notifications: rows.reverse() });
   });
 
-  app.post("/ignore-notif", (req: Request, res: Response) => {
-    const { id, notif_id } = req.body ?? {};
+  app.post("/ignore-notif", writeLimiter, (req: Request, res: Response) => {
+    const { name, id, notif_id } = req.body ?? {};
+    const agent = resolveAgent(name, id);
+    if (!agent) return res.status(400).json({ error: "unknown agent" });
     const row = db
       .prepare("SELECT id FROM notifications WHERE id = ? AND agent_id = ?")
-      .get(Number(notif_id), Number(id));
+      .get(Number(notif_id), agent.id);
     if (!row) return res.status(404).json({ error: "unknown notification" });
     db.prepare("DELETE FROM notifications WHERE id = ?").run(Number(notif_id));
     res.json({ ok: true });
   });
 
-  app.post("/ignore-notif/batch", (req: Request, res: Response) => {
-    const { id, notif_ids } = req.body ?? {};
+  app.post("/ignore-notif/batch", writeLimiter, (req: Request, res: Response) => {
+    const { name, id, notif_ids } = req.body ?? {};
+    const agent = resolveAgent(name, id);
+    if (!agent) return res.status(400).json({ error: "unknown agent" });
     if (!Array.isArray(notif_ids)) return res.status(400).json({ error: "notif_ids required" });
     const ack = db.prepare("DELETE FROM notifications WHERE id = ? AND agent_id = ?");
     let acked = 0;
     for (const notifId of notif_ids) {
-      acked += ack.run(Number(notifId), Number(id)).changes as number;
+      acked += ack.run(Number(notifId), agent.id).changes as number;
     }
     res.json({ acked });
   });
