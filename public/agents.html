@@ -9,16 +9,64 @@
     document.documentElement.classList.add("dark");
   }
 </script>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    darkMode: "class",
-    theme: { extend: { colors: {
-      aubergine: { DEFAULT: "#3f0e40", dark: "#350d36", light: "#611f69" },
-      brand: { DEFAULT: "#611f69", hover: "#4a154b" },
-    } } },
-  };
-</script>
+<style>
+  /* ponytail: hand-authored utility subset replacing the Tailwind CDN JIT build —
+     it was doing a network fetch + in-browser recompile on every load/nav.
+     Covers only the classes this page actually uses; add more if the markup grows. */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100vh; display: flex;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background: #fff; color: #27272a;
+  }
+  html.dark body { background: #1a1d21; color: #e4e4e7; }
+  .flex { display: flex; } .flex-col { flex-direction: column; } .flex-1 { flex: 1 1 0%; }
+  .items-center { align-items: center; } .justify-center { justify-content: center; }
+  .shrink-0 { flex-shrink: 0; } .min-w-0 { min-width: 0; }
+  .gap-2 { gap: .5rem; } .gap-3 { gap: .75rem; }
+  .w-60 { width: 15rem; } .w-9 { width: 2.25rem; } .h-9 { height: 2.25rem; }
+  .max-w-5xl { max-width: 64rem; } .mx-auto { margin-left: auto; margin-right: auto; }
+  .px-2 { padding-left: .5rem; padding-right: .5rem; } .-mx-2 { margin-left: -.5rem; margin-right: -.5rem; }
+  .px-3 { padding-left: .75rem; padding-right: .75rem; } .px-4 { padding-left: 1rem; padding-right: 1rem; }
+  .px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+  .py-1\.5 { padding-top: .375rem; padding-bottom: .375rem; } .py-2\.5 { padding-top: .625rem; padding-bottom: .625rem; }
+  .py-3 { padding-top: .75rem; padding-bottom: .75rem; } .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+  .py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; } .py-0\.5 { padding-top: .125rem; padding-bottom: .125rem; }
+  .mx-2 { margin-left: .5rem; margin-right: .5rem; } .mb-3 { margin-bottom: .75rem; } .mb-4 { margin-bottom: 1rem; }
+  .space-y-0\.5 > * + * { margin-top: .125rem; }
+  .rounded { border-radius: .25rem; } .rounded-md { border-radius: .375rem; } .rounded-full { border-radius: 9999px; }
+  .border-b { border-bottom: 1px solid; } .border { border: 1px solid; }
+  .border-white\/10 { border-color: rgba(255,255,255,.1); }
+  .border-brand\/20 { border-color: rgba(97,31,105,.2); }
+  .font-sans { font-family: inherit; } .font-bold { font-weight: 700; } .font-medium { font-weight: 500; }
+  .text-left { text-align: left; }
+  .text-lg { font-size: 1.125rem; } .text-xl { font-size: 1.25rem; }
+  .text-sm { font-size: .875rem; } .text-xs { font-size: .75rem; }
+  .divide-y > * + * { border-top: 1px solid; }
+  .transition { transition: background-color .15s, color .15s; }
+  .inline-flex { display: inline-flex; }
+  .antialiased { -webkit-font-smoothing: antialiased; }
+  a { text-decoration: none; }
+  button { border: 0; background: none; cursor: pointer; font: inherit; }
+
+  .bg-aubergine { background: #3f0e40; } html.dark .dark\:bg-aubergine-dark { background: #350d36; }
+  .text-white { color: #fff; } .text-white\/60 { color: rgba(255,255,255,.6); } .text-white\/70 { color: rgba(255,255,255,.7); }
+  .hover\:bg-white\/10:hover { background: rgba(255,255,255,.1); } .hover\:text-white:hover { color: #fff; }
+  .bg-white\/15 { background: rgba(255,255,255,.15); }
+
+  .bg-white { background: #fff; } html.dark .dark\:bg-\[\#1a1d21\] { background: #1a1d21; }
+  .text-zinc-800 { color: #27272a; } html.dark .dark\:text-zinc-200 { color: #e4e4e7; }
+  .text-zinc-900 { color: #18181b; } html.dark .dark\:text-white { color: #fff; }
+  .text-zinc-500 { color: #71717a; } html.dark .dark\:text-zinc-500 { color: #71717a; }
+  html.dark .dark\:text-zinc-100 { color: #f4f4f5; }
+  .divide-zinc-200 { border-color: #e4e4e7; } html.dark .dark\:divide-zinc-800 { border-color: #27272a; }
+  .hover\:bg-zinc-100:hover { background: #f4f4f5; } html.dark .dark\:hover\:bg-\[\#222529\]:hover { background: #222529; }
+
+  .bg-brand\/15 { background: rgba(97,31,105,.15); } .bg-brand\/10 { background: rgba(97,31,105,.1); }
+  .text-brand { color: #611f69; } html.dark .dark\:text-brand-hover { color: #4a154b; }
+</style>
 </head>
 <body class="min-h-screen bg-white dark:bg-[#1a1d21] text-zinc-800 dark:text-zinc-200 font-sans antialiased flex">
 <aside class="w-60 shrink-0 bg-aubergine dark:bg-aubergine-dark text-white flex flex-col">

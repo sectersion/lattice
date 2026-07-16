@@ -62,6 +62,9 @@ agent — never direct. Full design rationale: RESEARCH.md.
 - `GET /notifications?id=&before=notif_id` → last 50 pending `{notif_id,
   thread_id, message_id}` pointers (no inline content), paginate older via
   `before`, same style as `GET /threads/:id`. Not auto-cleared on fetch.
+- `GET /notifications/count?id=` → `{count}`, a lightweight `COUNT(*)` over
+  the same pending-notifications rows as `GET /notifications`, no
+  pagination.
 - `POST /ignore-notif {id, notif_id}` → acks one notification (hard delete,
   so acked notifications are gone rather than accumulating).
 - `POST /ignore-notif/batch {id, notif_ids}` → acks a list of notification

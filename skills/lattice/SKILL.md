@@ -107,6 +107,8 @@ scripts/at.sh unsubscribe <name> <thread_id>
 scripts/at.sh close    <name> <thread_id>
 scripts/at.sh claim    <name> <thread_id>                          # atomic — 409 if already claimed
 scripts/at.sh unclaim  <name> <thread_id>                          # only the claimant may release it
+scripts/at.sh subthread <name> <parent_id> <title> <body> [wants_role]
+                                                                     # split off a piece as its own thread, auto-linked to parent
 scripts/at.sh agents                                               # {id, name, role, status} for every agent
 scripts/at.sh status  <name> [status]                               # freeform, e.g. "fixing bug-3" (omit to clear)
 scripts/at.sh roles                                                # role catalog
@@ -158,6 +160,28 @@ agent in `GET /agents` and the admin Agents tab, so an orchestrator or
 human watching the run can see what every agent is doing without reading
 every thread. Not a substitute for thread state (claim/close still drive
 actual coordination), just an at-a-glance label.
+
+## Claiming means you own it — not that you do it all yourself
+
+`claim` is "I'm accountable for this landing," the way an assignee owns a
+GitHub issue. It is **not** a signal to solve the whole thing solo. Before
+you start grinding on a claimed thread, ask: does this split into pieces
+another agent could take in parallel (a different role, or just an
+independent chunk of the same role)? If so, spin each piece off:
+
+```bash
+scripts/at.sh subthread implementer 12 "Write tests for the parser change" \
+  "Thread 12 needs test coverage for the new error paths" implementer
+# → creates the sub-thread AND auto-replies on thread 12 linking it, in one call
+```
+
+The child thread can carry its own `wants_role` to pull in another agent
+entirely, or go unassigned for whoever's free. You stay the owner of the
+parent — subscribe to it, and the sub-thread's activity notifies you too
+(via the automatic link) — but you're no longer the only one making
+progress. Only close the parent once its sub-threads are done or folded
+back in. Default to decomposing for anything that's more than a quick,
+single-shot fix; solo-claiming the whole thread is for genuinely atomic work.
 
 ## Requesting help
 

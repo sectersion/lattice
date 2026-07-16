@@ -1,0 +1,150 @@
+/* ponytail: hand-rolled utility subset replacing the CDN Tailwind JIT
+   build (network round trip + in-browser compile on every load) for
+   index.html specifically. Covers exactly the classes this page uses;
+   add more if the markup grows past what's here. */
+
+:root {
+  --aubergine: #3f0e40;
+  --aubergine-dark: #350d36;
+  --brand: #611f69;
+  --brand-hover: #4a154b;
+}
+
+* { box-sizing: border-box; }
+html.dark body { background: #1a1d21; color: #e4e4e7; }
+body {
+  min-height: 100vh; background: #fff; color: #27272a;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased; display: flex; margin: 0;
+}
+
+.flex { display: flex; }
+.inline-flex { display: inline-flex; }
+.flex-col { flex-direction: column; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-1 { flex: 1 1 0%; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.shrink-0 { flex-shrink: 0; }
+.min-w-0 { min-width: 0; }
+.block { display: block; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.gap-2 { gap: .5rem; }
+.gap-3 { gap: .75rem; }
+.space-y-0\.5 > * + * { margin-top: .125rem; }
+.divide-y > * + * { border-top: 1px solid #e4e4e7; }
+html.dark .divide-y > * + * { border-top-color: #27272a; }
+
+.w-60 { width: 15rem; }
+.w-8 { width: 2rem; }
+.h-8 { height: 2rem; }
+.min-h-screen { min-height: 100vh; }
+.max-w-5xl { max-width: 64rem; }
+.mx-auto { margin-left: auto; margin-right: auto; }
+.mx-2 { margin-left: .5rem; margin-right: .5rem; }
+.mb-3 { margin-bottom: .75rem; }
+.mb-4 { margin-bottom: 1rem; }
+
+.px-2 { padding-left: .5rem; padding-right: .5rem; }
+.px-2\.5 { padding-left: .625rem; padding-right: .625rem; }
+.px-3 { padding-left: .75rem; padding-right: .75rem; }
+.px-4 { padding-left: 1rem; padding-right: 1rem; }
+.px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+.py-1 { padding-top: .25rem; padding-bottom: .25rem; }
+.py-1\.5 { padding-top: .375rem; padding-bottom: .375rem; }
+.py-2\.5 { padding-top: .625rem; padding-bottom: .625rem; }
+.py-3 { padding-top: .75rem; padding-bottom: .75rem; }
+.py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+.py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+.py-0\.5 { padding-top: .125rem; padding-bottom: .125rem; }
+
+.rounded { border-radius: .25rem; }
+.rounded-md { border-radius: .375rem; }
+.rounded-full { border-radius: 9999px; }
+.border { border-width: 1px; border-style: solid; border-color: #e4e4e7; }
+.border-b { border-bottom-width: 1px; border-bottom-style: solid; }
+
+.font-sans { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+.font-bold { font-weight: 700; }
+.font-medium { font-weight: 500; }
+.text-left { text-align: left; }
+.text-lg { font-size: 1.125rem; }
+.text-xl { font-size: 1.25rem; }
+.text-sm { font-size: .875rem; }
+.text-xs { font-size: .75rem; }
+
+.transition { transition: all .15s ease; }
+button, select, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .6; }
+
+/* colors */
+.bg-white { background: #fff; }
+.bg-zinc-100 { background: #f4f4f5; }
+.text-zinc-500 { color: #71717a; }
+.text-zinc-600 { color: #52525b; }
+.text-zinc-800 { color: #27272a; }
+.text-zinc-900 { color: #18181b; }
+.border-zinc-300 { border-color: #d4d4d8; }
+.placeholder-zinc-400::placeholder { color: #a1a1aa; }
+
+html.dark .dark\:bg-\[\#1a1d21\] { background: #1a1d21; }
+html.dark .dark\:bg-\[\#222529\] { background: #222529; }
+html.dark .dark\:bg-zinc-800 { background: #27272a; }
+html.dark .dark\:border-zinc-700 { border-color: #3f3f46; }
+html.dark .dark\:divide-zinc-800 > * + * { border-top-color: #27272a; }
+html.dark .dark\:text-white { color: #fff; }
+html.dark .dark\:text-zinc-100 { color: #f4f4f5; }
+html.dark .dark\:text-zinc-200 { color: #e4e4e7; }
+html.dark .dark\:text-zinc-300 { color: #d4d4d8; }
+html.dark .dark\:text-zinc-400 { color: #a1a1aa; }
+html.dark .dark\:text-zinc-500 { color: #71717a; }
+html.dark .dark\:placeholder-zinc-500::placeholder { color: #71717a; }
+
+.bg-aubergine { background: var(--aubergine); }
+html.dark .dark\:bg-aubergine-dark { background: var(--aubergine-dark); }
+.bg-white\/15 { background: rgba(255,255,255,.15); }
+.bg-white\/10:hover, .hover\:bg-white\/10:hover { background: rgba(255,255,255,.10); }
+.border-white\/10 { border-color: rgba(255,255,255,.10); }
+.text-white { color: #fff; }
+.text-white\/60 { color: rgba(255,255,255,.60); }
+.text-white\/70 { color: rgba(255,255,255,.70); }
+.hover\:text-white:hover { color: #fff; }
+
+.bg-brand\/15 { background: rgba(97,31,105,.15); }
+.text-brand { color: var(--brand); }
+html.dark .dark\:text-brand-hover { color: var(--brand-hover); }
+.hover\:text-brand:hover { color: var(--brand); }
+html.dark .dark\:hover\:text-brand-hover:hover { color: var(--brand-hover); }
+.focus\:outline-none:focus { outline: none; }
+.focus\:ring-1:focus { box-shadow: 0 0 0 1px rgba(97,31,105,.5); }
+.focus\:border-brand\/50:focus { border-color: rgba(97,31,105,.5); }
+
+.bg-green-500\/10 { background: rgba(34,197,94,.10); }
+.text-green-600 { color: #16a34a; }
+html.dark .dark\:text-green-400 { color: #4ade80; }
+.border-green-500\/20 { border-color: rgba(34,197,94,.20); }
+
+.bg-zinc-500\/10 { background: rgba(113,113,122,.10); }
+.border-zinc-500\/20 { border-color: rgba(113,113,122,.20); }
+
+.bg-blue-500\/10 { background: rgba(59,130,246,.10); }
+.text-blue-600 { color: #2563eb; }
+html.dark .dark\:text-blue-400 { color: #60a5fa; }
+.border-blue-500\/20 { border-color: rgba(59,130,246,.20); }
+
+.hover\:bg-red-500\/10:hover { background: rgba(239,68,68,.10); }
+.hover\:text-red-500:hover { color: #ef4444; }
+.hover\:border-red-500\/30:hover { border-color: rgba(239,68,68,.30); }
+.hover\:bg-zinc-100:hover { background: #f4f4f5; }
+html.dark .dark\:hover\:bg-\[\#222529\]:hover { background: #222529; }
+
+select, input[type="search"], input[type="checkbox"] {
+  background: #f4f4f5; border: 1px solid #d4d4d8; border-radius: .375rem;
+  color: #27272a; padding: .375rem .75rem;
+}
+html.dark select, html.dark input[type="search"] {
+  background: #222529; border-color: #3f3f46; color: #e4e4e7;
+}
+input[type="checkbox"] { padding: 0; width: 1rem; height: 1rem; accent-color: var(--brand); }

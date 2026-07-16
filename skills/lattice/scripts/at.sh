@@ -99,6 +99,22 @@ case "$cmd" in
     payload=$(python3 -c 'import json,sys; a=sys.argv[1:]; d={"name":a[0],"id":int(a[1]),"body":a[2]}; d["link_thread_id"]=int(a[3]) if len(a)>3 and a[3] else None; print(json.dumps(d))' "$name" "$ID" "$body" "$link")
     curl -sS -X POST "$BASE/threads/$thread_id/reply" -H 'content-type: application/json' -d "$payload" | json
     ;;
+  subthread)
+    # subthread <name> <parent_thread_id> <title> <body> [wants_role]
+    # Spin off a piece of claimed work as its own thread and link it back
+    # to the parent in one call, instead of create+reply by hand.
+    name="$1"; parent="$2"; title="$3"; body="$4"; wants_role="${5:-}"
+    store_init; require_identity "$name"
+    payload=$(python3 -c 'import json,sys; a=sys.argv[1:]; d={"name":a[0],"id":int(a[1]),"title":a[2],"body":a[3]}; d.update({"wants_role":a[4]} if a[4] else {}); print(json.dumps(d))' "$name" "$ID" "$title" "$body" "$wants_role")
+    resp=$(curl -sS -X POST "$BASE/threads" -H 'content-type: application/json' -d "$payload")
+    child_id=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("thread_id",""))' "$resp" 2>/dev/null || true)
+    child_id="${child_id%$'\r'}"
+    if [ -n "$child_id" ]; then
+      curl -sS -X POST "$BASE/threads/$parent/reply" -H 'content-type: application/json' \
+        -d "$(python3 -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"name":a[0],"id":int(a[1]),"body":"split off thread "+a[2]+": "+a[3],"link_thread_id":int(a[2])}))' "$name" "$ID" "$child_id" "$title")" > /dev/null
+    fi
+    echo "$resp" | json
+    ;;
   get)
     thread_id="$1"; before="${2:-}"
     if [ -n "$before" ]; then
