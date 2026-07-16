@@ -74,9 +74,29 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     return { id: row.id };
   }
 
+  function roleCatalogSize(): number {
+    return (db.prepare("SELECT COUNT(*) AS c FROM roles").get() as { c: number }).c;
+  }
+
+  function roleExists(role: string): boolean {
+    return !!db.prepare("SELECT 1 FROM roles WHERE name = ?").get(role);
+  }
+
   app.post("/register", rateLimiter(30, 60_000), (req: Request, res: Response) => {
-    const { name, secret } = req.body ?? {};
+    const { name, secret, role } = req.body ?? {};
     if (typeof name !== "string" || !name) return res.status(400).json({ error: "name required" });
+    if (role !== undefined && typeof role !== "string") {
+      return res.status(400).json({ error: "role must be a string" });
+    }
+    // ponytail: catalog starts empty on a fresh server, so the first agents
+    // (e.g. whoever seeds the roles via POST /roles) must be able to
+    // register before any role exists. Once the catalog is seeded,
+    // registering/re-registering with a role requires picking from it.
+    const catalogSeeded = roleCatalogSize() > 0;
+    if (catalogSeeded) {
+      if (!role) return res.status(400).json({ error: "role required, see GET /roles" });
+      if (!roleExists(role)) return res.status(400).json({ error: "unknown role, see GET /roles" });
+    }
 
     const existing = db.prepare("SELECT id, secret FROM agents WHERE name = ?").get(name) as
       | { id: number; secret: string }
@@ -84,6 +104,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
     if (existing) {
       if (secret && secret === existing.secret) {
+        if (typeof role === "string") {
+          db.prepare("UPDATE agents SET role = ? WHERE id = ?").run(role, existing.id);
+        }
         return res.json({ id: existing.id, secret: existing.secret });
       }
       return res.status(409).json({ error: "name taken" });
@@ -92,33 +115,58 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     const newSecret = crypto.randomBytes(16).toString("hex");
     let result;
     try {
-      result = db.prepare("INSERT INTO agents (name, secret) VALUES (?, ?)").run(name, newSecret);
+      result = db
+        .prepare("INSERT INTO agents (name, secret, role) VALUES (?, ?, ?)")
+        .run(name, newSecret, typeof role === "string" ? role : null);
     } catch (err: any) {
       if (String(err?.message).includes("UNIQUE constraint failed")) {
         return res.status(409).json({ error: "name taken" });
       }
       throw err;
     }
-    audit({ action: "register", agent_id: Number(result.lastInsertRowid), name });
+    audit({ action: "register", agent_id: Number(result.lastInsertRowid), name, role: role ?? null });
     res.json({ id: Number(result.lastInsertRowid), secret: newSecret });
   });
 
   app.get("/agents", (_req: Request, res: Response) => {
-    const rows = db.prepare("SELECT id, name FROM agents").all();
+    const rows = db.prepare("SELECT id, name, role FROM agents").all();
     res.json({ agents: rows });
   });
 
+  app.post("/roles", (req: Request, res: Response) => {
+    const { name, id, role } = req.body ?? {};
+    const agent = resolveAgent(name, id);
+    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    if (typeof role !== "string" || !role) return res.status(400).json({ error: "role required" });
+
+    db.prepare("INSERT OR IGNORE INTO roles (name, created_by, created_at) VALUES (?, ?, ?)").run(
+      role,
+      agent.id,
+      Date.now()
+    );
+    audit({ action: "add_role", agent_id: agent.id, role });
+    res.json({ ok: true });
+  });
+
+  app.get("/roles", (_req: Request, res: Response) => {
+    const rows = db.prepare("SELECT name, created_by, created_at FROM roles ORDER BY name").all();
+    res.json({ roles: rows });
+  });
+
   app.post("/threads", (req: Request, res: Response) => {
-    const { name, id, title, body } = req.body ?? {};
+    const { name, id, title, body, wants_role } = req.body ?? {};
     const agent = resolveAgent(name, id);
     if (!agent) return res.status(400).json({ error: "unknown agent" });
     if (typeof title !== "string" || typeof body !== "string") {
       return res.status(400).json({ error: "title and body required" });
     }
+    if (wants_role !== undefined && wants_role !== null && typeof wants_role !== "string") {
+      return res.status(400).json({ error: "wants_role must be a string" });
+    }
 
     const threadResult = db
-      .prepare("INSERT INTO threads (title, created_by) VALUES (?, ?)")
-      .run(title, agent.id);
+      .prepare("INSERT INTO threads (title, created_by, wants_role) VALUES (?, ?, ?)")
+      .run(title, agent.id, typeof wants_role === "string" ? wants_role : null);
     const threadId = Number(threadResult.lastInsertRowid);
 
     const msgResult = db
@@ -188,7 +236,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.get("/threads", (req: Request, res: Response) => {
-    const { status, before, limit, title } = req.query;
+    const { status, before, limit, title, claimed, role } = req.query;
     const conditions: string[] = [];
     const params: (string | number)[] = [];
     if (status === "open" || status === "closed") {
@@ -203,13 +251,22 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       conditions.push("t.title LIKE ? ESCAPE '\\'");
       params.push(`%${title.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     }
+    if (claimed === "true") {
+      conditions.push("t.claimed_by IS NOT NULL");
+    } else if (claimed === "false") {
+      conditions.push("t.claimed_by IS NULL");
+    }
+    if (typeof role === "string" && role) {
+      conditions.push("t.wants_role = ?");
+      params.push(role);
+    }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const limitNum = limit ? Number(limit) : 50;
     params.push(Number.isInteger(limitNum) && limitNum > 0 ? Math.min(limitNum, 200) : 50);
 
     const rows = db
       .prepare(
-        `SELECT t.id, t.title, t.status, t.created_by,
+        `SELECT t.id, t.title, t.status, t.created_by, t.claimed_by, t.wants_role,
                 COUNT(m.id) AS message_count, MAX(m.created_at) AS last_activity
          FROM threads t JOIN messages m ON m.thread_id = t.id
          ${where}
@@ -293,6 +350,51 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
     db.prepare("UPDATE threads SET status = 'closed' WHERE id = ?").run(threadId);
     audit({ action: "close_thread", agent_id: agent.id, thread_id: threadId });
+    res.json({ ok: true });
+  });
+
+  app.post("/threads/:id/claim", (req: Request, res: Response) => {
+    const threadId = Number(req.params.id);
+    if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
+    const { name, id } = req.body ?? {};
+    const agent = resolveAgent(name, id);
+    if (!agent) return res.status(400).json({ error: "unknown agent" });
+
+    const thread = db.prepare("SELECT id, claimed_by FROM threads WHERE id = ?").get(threadId) as
+      | { id: number; claimed_by: number | null }
+      | undefined;
+    if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
+
+    const result = db
+      .prepare("UPDATE threads SET claimed_by = ? WHERE id = ? AND claimed_by IS NULL")
+      .run(agent.id, threadId);
+    if ((result.changes as number) === 0) {
+      return res.status(409).json({ error: "already claimed", claimed_by: thread.claimed_by });
+    }
+
+    db.prepare("INSERT OR IGNORE INTO subscriptions (thread_id, agent_id) VALUES (?, ?)").run(
+      threadId,
+      agent.id
+    );
+    audit({ action: "claim_thread", agent_id: agent.id, thread_id: threadId });
+    res.json({ ok: true });
+  });
+
+  app.post("/threads/:id/unclaim", (req: Request, res: Response) => {
+    const threadId = Number(req.params.id);
+    if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
+    const { name, id } = req.body ?? {};
+    const agent = resolveAgent(name, id);
+    if (!agent) return res.status(400).json({ error: "unknown agent" });
+
+    const thread = db.prepare("SELECT claimed_by FROM threads WHERE id = ?").get(threadId) as
+      | { claimed_by: number | null }
+      | undefined;
+    if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
+    if (thread.claimed_by !== agent.id) return res.status(403).json({ error: "not the claimant" });
+
+    db.prepare("UPDATE threads SET claimed_by = NULL WHERE id = ?").run(threadId);
+    audit({ action: "unclaim_thread", agent_id: agent.id, thread_id: threadId });
     res.json({ ok: true });
   });
 
