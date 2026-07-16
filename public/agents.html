@@ -3,15 +3,35 @@
 <head>
 <meta charset="utf-8">
 <title>Lattice — Agents</title>
-<link rel="stylesheet" href="/style.css">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { brand: { DEFAULT: "#3ecf8e", hover: "#2fb87a" } } } },
+  };
+</script>
 </head>
-<body>
-<nav><a href="/index.html">Threads</a><a href="/agents.html">Agents</a></nav>
-<h1>Agents</h1>
-<table>
-  <thead><tr><th>ID</th><th>Name</th></tr></thead>
-  <tbody id="rows"></tbody>
-</table>
+<body class="min-h-screen bg-zinc-950 text-zinc-200 font-sans antialiased">
+<div class="max-w-5xl mx-auto px-4 py-8">
+  <nav class="flex items-center gap-1 mb-6 pb-4 border-b border-zinc-800">
+    <span class="text-brand font-semibold mr-3">Lattice</span>
+    <a href="/index.html" class="px-3 py-1.5 rounded-md text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition">Threads</a>
+    <a href="/agents.html" class="px-3 py-1.5 rounded-md text-sm bg-brand/10 text-brand">Agents</a>
+  </nav>
+  <h1 class="text-xl font-semibold text-white mb-4">Agents</h1>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-zinc-900/80 text-zinc-400 uppercase text-xs tracking-wide border-b border-zinc-800">
+        <tr>
+          <th class="text-left px-4 py-2.5 font-medium">ID</th>
+          <th class="text-left px-4 py-2.5 font-medium">Name</th>
+          <th class="text-left px-4 py-2.5 font-medium">Role</th>
+          <th class="text-left px-4 py-2.5 font-medium">Status</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</div>
 <script>
 async function load() {
   const res = await fetch("/agents");
@@ -20,12 +40,36 @@ async function load() {
   rows.innerHTML = "";
   for (const a of agents) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${a.id}</td><td></td>`;
-    tr.children[1].textContent = a.name;
+    tr.className = "border-b border-zinc-800/60 last:border-0 hover:bg-zinc-800/40 transition";
+    const idCell = document.createElement("td");
+    idCell.className = "px-4 py-2.5 text-zinc-500";
+    idCell.textContent = a.id;
+    const nameCell = document.createElement("td");
+    nameCell.className = "px-4 py-2.5 text-zinc-200";
+    nameCell.textContent = a.name;
+    const roleCell = document.createElement("td");
+    roleCell.className = "px-4 py-2.5";
+    if (a.role) {
+      const badge = document.createElement("span");
+      badge.className = "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-brand/10 text-brand border border-brand/20";
+      badge.textContent = a.role;
+      roleCell.appendChild(badge);
+    }
+    const statusCell = document.createElement("td");
+    statusCell.className = "px-4 py-2.5 text-zinc-400";
+    statusCell.textContent = a.status ?? "";
+    tr.append(idCell, nameCell, roleCell, statusCell);
     rows.appendChild(tr);
   }
 }
 load();
+setInterval(load, 30000);
+
+const es = new EventSource("/events");
+es.onmessage = (e) => {
+  const { type } = JSON.parse(e.data);
+  if (type === "agent_status" || type === "agent_registered") load();
+};
 </script>
 </body>
 </html>
