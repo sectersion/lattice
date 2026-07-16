@@ -450,6 +450,66 @@ async function main() {
     }
     assert.ok(sawRateLimit, "expected /register to eventually rate-limit");
 
+    // 26. POST /agents/status sets a freeform status shown in GET /agents;
+    // wrong name/id pair is rejected, null clears it
+    const setStatus = await call("POST", "/agents/status", {
+      name: "D",
+      id: d.json.id,
+      status: "fixing bug-3",
+    });
+    assert.strictEqual(setStatus.status, 200);
+    const agentsWithStatus = await call("GET", "/agents");
+    const dRowWithStatus = agentsWithStatus.json.agents.find(
+      (ag: { id: number }) => ag.id === d.json.id
+    );
+    assert.strictEqual(dRowWithStatus.status, "fixing bug-3");
+
+    const setStatusWrongId = await call("POST", "/agents/status", {
+      name: "D",
+      id: b.json.id,
+      status: "impersonating",
+    });
+    assert.strictEqual(setStatusWrongId.status, 400);
+
+    const clearStatus = await call("POST", "/agents/status", {
+      name: "D",
+      id: d.json.id,
+      status: null,
+    });
+    assert.strictEqual(clearStatus.status, 200);
+    const agentsAfterClear = await call("GET", "/agents");
+    const dRowCleared = agentsAfterClear.json.agents.find(
+      (ag: { id: number }) => ag.id === d.json.id
+    );
+    assert.strictEqual(dRowCleared.status, null);
+
+    // SSE: open /events, trigger a thread creation, expect a matching
+    // "message" event on the stream within a few seconds.
+    const sseController = new AbortController();
+    const sseRes = await fetch(base + "/events", { signal: sseController.signal });
+    assert.strictEqual(sseRes.status, 200);
+    assert.match(sseRes.headers.get("content-type") ?? "", /text\/event-stream/);
+    const reader = sseRes.body!.getReader();
+    const decoder = new TextDecoder();
+
+    const eventsSeen = (async () => {
+      let buf = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) return buf;
+        buf += decoder.decode(value, { stream: true });
+        if (buf.includes('"type":"message"')) return buf;
+      }
+    })();
+
+    await call("POST", "/threads", { name: "A", id: a.json.id, title: "SSE thread", body: "hi" });
+
+    const timeout = new Promise((resolve) => setTimeout(() => resolve("timeout"), 5000));
+    const sseResult = await Promise.race([eventsSeen, timeout]);
+    assert.notStrictEqual(sseResult, "timeout", "expected an SSE 'message' event within 5s");
+    assert.match(sseResult as string, /"type":"message"/);
+    sseController.abort();
+
     console.log("all integration checks passed");
   } finally {
     server.close();

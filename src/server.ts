@@ -65,6 +65,30 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
   app.use(express.static(path.join(__dirname, "..", "public")));
 
+  // ponytail: single in-process Set of open SSE responses — this server is
+  // single-process per CLAUDE.md, no pub/sub infra needed. Upgrade path: a
+  // real broker if this ever runs multi-instance.
+  const sseClients = new Set<Response>();
+  function broadcast(event: Record<string, unknown>) {
+    const payload = `data: ${JSON.stringify(event)}\n\n`;
+    for (const client of sseClients) {
+      client.write(payload);
+    }
+  }
+
+  app.get("/events", (req: Request, res: Response) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    res.write(": connected\n\n");
+    sseClients.add(res);
+    req.on("close", () => {
+      sseClients.delete(res);
+    });
+  });
+
   function resolveAgent(name: unknown, id: unknown): { id: number } | null {
     if (typeof name !== "string" || (typeof id !== "number" && typeof id !== "string")) return null;
     const row = db.prepare("SELECT id, name FROM agents WHERE id = ?").get(Number(id)) as
@@ -125,15 +149,29 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       throw err;
     }
     audit({ action: "register", agent_id: Number(result.lastInsertRowid), name, role: role ?? null });
+    broadcast({ type: "agent_registered", agent_id: Number(result.lastInsertRowid) });
     res.json({ id: Number(result.lastInsertRowid), secret: newSecret });
   });
 
   app.get("/agents", (_req: Request, res: Response) => {
-    const rows = db.prepare("SELECT id, name, role FROM agents").all();
+    const rows = db.prepare("SELECT id, name, role, status FROM agents").all();
     res.json({ agents: rows });
   });
 
   const writeLimiter = rateLimiter(30, 60_000);
+
+  app.post("/agents/status", writeLimiter, (req: Request, res: Response) => {
+    const { name, id, status } = req.body ?? {};
+    const agent = resolveAgent(name, id);
+    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    if (status !== null && typeof status !== "string") {
+      return res.status(400).json({ error: "status must be a string or null" });
+    }
+    db.prepare("UPDATE agents SET status = ? WHERE id = ?").run(status, agent.id);
+    audit({ action: "set_status", agent_id: agent.id, status });
+    broadcast({ type: "agent_status", agent_id: agent.id });
+    res.json({ ok: true });
+  });
 
   app.post("/roles", (req: Request, res: Response) => {
     const { name, id, role } = req.body ?? {};
@@ -187,6 +225,8 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     );
 
     audit({ action: "create_thread", agent_id: agent.id, thread_id: threadId, message_id: Number(msgResult.lastInsertRowid) });
+    broadcast({ type: "thread_created", thread_id: threadId });
+    broadcast({ type: "message", thread_id: threadId });
     res.json({ thread_id: threadId, message_id: Number(msgResult.lastInsertRowid) });
   });
 
@@ -238,6 +278,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     }
 
     audit({ action: "reply", agent_id: agent.id, thread_id: threadId, message_id: messageId, link_thread_id: linkId });
+    broadcast({ type: "message", thread_id: threadId });
     res.json({ message_id: messageId });
   });
 
@@ -359,6 +400,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
     db.prepare("UPDATE threads SET status = 'closed' WHERE id = ?").run(threadId);
     audit({ action: "close_thread", agent_id: agent.id, thread_id: threadId });
+    broadcast({ type: "thread_closed", thread_id: threadId });
     res.json({ ok: true });
   });
 
@@ -386,6 +428,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       agent.id
     );
     audit({ action: "claim_thread", agent_id: agent.id, thread_id: threadId });
+    broadcast({ type: "thread_claimed", thread_id: threadId });
     res.json({ ok: true });
   });
 
@@ -404,6 +447,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
     db.prepare("UPDATE threads SET claimed_by = NULL WHERE id = ?").run(threadId);
     audit({ action: "unclaim_thread", agent_id: agent.id, thread_id: threadId });
+    broadcast({ type: "thread_unclaimed", thread_id: threadId });
     res.json({ ok: true });
   });
 
@@ -417,6 +461,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
     db.prepare("UPDATE threads SET status = 'closed' WHERE id = ?").run(threadId);
     audit({ action: "admin_close_thread", thread_id: threadId });
+    broadcast({ type: "thread_closed", thread_id: threadId });
     res.json({ ok: true });
   });
 
