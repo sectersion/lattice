@@ -23,6 +23,10 @@ function formatTime(ms) {
   return new Date(ms).toLocaleString();
 }
 
+function initials(name) {
+  return (name ?? "?").trim().slice(0, 2).toUpperCase();
+}
+
 // ponytail: admin token is optional (server only enforces it if ADMIN_TOKEN
 // is set); prompt lazily on first 401 rather than always asking for one.
 async function adminFetch(url, opts = {}) {
@@ -35,3 +39,21 @@ async function adminFetch(url, opts = {}) {
   }
   return res;
 }
+
+// Theme: class-strategy dark mode, persisted in localStorage, defaults to
+// system preference. Applied ASAP (before body paints) via inline script
+// in each page's <head>, this just wires the toggle button.
+function initThemeToggle() {
+  const btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+  const update = () => {
+    btn.textContent = document.documentElement.classList.contains("dark") ? "☀️" : "🌙";
+  };
+  update();
+  btn.addEventListener("click", () => {
+    const dark = document.documentElement.classList.toggle("dark");
+    localStorage.setItem("lattice_theme", dark ? "dark" : "light");
+    update();
+  });
+}
+document.addEventListener("DOMContentLoaded", initThemeToggle);

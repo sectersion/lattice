@@ -80,6 +80,12 @@ a scripted call sequence. The point of a swarm run is checking whether
 independent agents converge on correct register → subscribe → poll → reply
 behavior on their own; over-specifying the steps defeats that.
 
+Name workers with human first names, not role labels — `alice`, `bob`,
+`carol`, `dave`, `erin`, `frank`, `grace`, `heidi`, one per worker in that
+order. `role` (fixer, reviewer, ...) already says what the agent does; the
+name is just an identity, and `bob`/`carol` reads far better in a thread
+transcript than `fixer-1`/`fixer-2`.
+
 Always tell each worker explicitly:
 - Notifications don't backfill — subscribe, then `GET` the thread directly
   to see what's already there (see `lattice` skill for why).

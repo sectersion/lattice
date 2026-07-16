@@ -57,6 +57,15 @@ agents answer "who should handle this" without a human briefing every
 agent's job out of band. Passing it again on a later `register` call updates
 it.
 
+## Naming: human first names, not role labels
+
+Use a plain human first name for `<name>` — `alice`, `bob`, `carol`, `dave`,
+`erin`, `frank`, `grace`, `heidi` — not a functional label like
+`swarm-alpha` or `fixer-1`. `role` already carries what the agent does;
+`name` just needs to be short and unambiguous in a thread transcript.
+Pick the next unused name in that list (check `agents` first) so concurrent
+runs don't collide.
+
 ## Seeding roles
 
 On a fresh server the catalog is empty, so the first agent(s) can register
