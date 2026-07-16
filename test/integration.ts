@@ -262,6 +262,74 @@ async function main() {
       delete process.env.ADMIN_TOKEN;
     }
 
+    // 18b. role catalog: empty catalog bootstraps freely, seeded catalog is
+    // enforced on /register. Isolated db/server so seeding it doesn't affect
+    // the free-text-role registrations used elsewhere in this suite.
+    const rolesDbPath = path.join(os.tmpdir(), `agent-threads-test-roles-${Date.now()}.db`);
+    const rolesDb = openDb(rolesDbPath);
+    const rolesApp = createServer(rolesDb, rolesDbPath);
+    const rolesServer = rolesApp.listen(0);
+    await new Promise((resolve) => rolesServer.once("listening", resolve));
+    const rolesPort = (rolesServer.address() as { port: number }).port;
+    const rolesBase = `http://localhost:${rolesPort}`;
+    async function rolesCall(method: string, url: string, body?: unknown) {
+      const res = await fetch(rolesBase + url, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { status: res.status, json: await res.json() };
+    }
+    try {
+      // empty catalog: registering with no role, or any role, both succeed
+      const bootstrapNoRole = await rolesCall("POST", "/register", { name: "Boot1" });
+      assert.strictEqual(bootstrapNoRole.status, 200);
+      const bootstrap = await rolesCall("POST", "/register", { name: "Supervisor" });
+      assert.strictEqual(bootstrap.status, 200);
+
+      const addRole1 = await rolesCall("POST", "/roles", {
+        name: "Supervisor",
+        id: bootstrap.json.id,
+        role: "implementer",
+      });
+      assert.strictEqual(addRole1.status, 200);
+      const addRole2 = await rolesCall("POST", "/roles", {
+        name: "Supervisor",
+        id: bootstrap.json.id,
+        role: "reviewer",
+      });
+      assert.strictEqual(addRole2.status, 200);
+      // idempotent: re-adding an existing role is a harmless no-op
+      const addRoleDup = await rolesCall("POST", "/roles", {
+        name: "Supervisor",
+        id: bootstrap.json.id,
+        role: "reviewer",
+      });
+      assert.strictEqual(addRoleDup.status, 200);
+
+      const rolesList = await rolesCall("GET", "/roles");
+      assert.deepStrictEqual(
+        rolesList.json.roles.map((r: { name: string }) => r.name),
+        ["implementer", "reviewer"]
+      );
+
+      // catalog now seeded: missing or unknown role -> 400
+      const noRoleAfterSeed = await rolesCall("POST", "/register", { name: "NoRole" });
+      assert.strictEqual(noRoleAfterSeed.status, 400);
+      const unknownRole = await rolesCall("POST", "/register", { name: "Bad", role: "backend" });
+      assert.strictEqual(unknownRole.status, 400);
+
+      // known role -> succeeds
+      const goodRole = await rolesCall("POST", "/register", { name: "Impl1", role: "implementer" });
+      assert.strictEqual(goodRole.status, 200);
+    } finally {
+      rolesServer.close();
+      rolesDb.close();
+      fs.rmSync(rolesDbPath, { force: true });
+      fs.rmSync(rolesDbPath + "-wal", { force: true });
+      fs.rmSync(rolesDbPath + "-shm", { force: true });
+    }
+
     // 19. malformed JSON body -> 400 JSON error, not a raw HTML crash
     const malformed = await fetch(`${base}/threads`, {
       method: "POST",
@@ -286,7 +354,89 @@ async function main() {
     const bigLimit = await call("GET", "/threads?limit=999999999");
     assert.ok(bigLimit.json.threads.length <= 200);
 
-    // 22. POST /register is rate-limited per IP (30/min) -> eventually 429
+    // 22. register with a role -> stored and returned by GET /agents; a
+    // later register call updates it
+    const d = await call("POST", "/register", { name: "D", role: "reviewer" });
+    assert.strictEqual(d.status, 200);
+    const agentsWithD = await call("GET", "/agents");
+    const dRow = agentsWithD.json.agents.find((ag: { id: number }) => ag.id === d.json.id);
+    assert.strictEqual(dRow.role, "reviewer");
+    const dReconnect = await call("POST", "/register", {
+      name: "D",
+      secret: d.json.secret,
+      role: "backend",
+    });
+    assert.strictEqual(dReconnect.status, 200);
+    const agentsAfterRoleUpdate = await call("GET", "/agents");
+    const dRowUpdated = agentsAfterRoleUpdate.json.agents.find(
+      (ag: { id: number }) => ag.id === d.json.id
+    );
+    assert.strictEqual(dRowUpdated.role, "backend");
+
+    // 23. claim/unclaim: atomic, exclusive, only the claimant can release
+    const t3 = await call("POST", "/threads", {
+      name: "D",
+      id: d.json.id,
+      title: "Thread 3",
+      body: "work item",
+    });
+    const thread3 = t3.json.thread_id;
+
+    const unclaimedListing = await call("GET", "/threads?claimed=false");
+    assert.ok(unclaimedListing.json.threads.some((t: { id: number }) => t.id === thread3));
+
+    const claimByB = await call("POST", `/threads/${thread3}/claim`, { name: "B", id: b.json.id });
+    assert.strictEqual(claimByB.status, 200);
+
+    const claimByC = await call("POST", `/threads/${thread3}/claim`, { name: "C", id: c.json.id });
+    assert.strictEqual(claimByC.status, 409);
+    assert.strictEqual(claimByC.json.claimed_by, b.json.id);
+
+    const claimedListing = await call("GET", "/threads?claimed=true");
+    const listedThread3 = claimedListing.json.threads.find((t: { id: number }) => t.id === thread3);
+    assert.strictEqual(listedThread3.claimed_by, b.json.id);
+
+    const unclaimByWrongAgent = await call("POST", `/threads/${thread3}/unclaim`, {
+      name: "C",
+      id: c.json.id,
+    });
+    assert.strictEqual(unclaimByWrongAgent.status, 403);
+
+    const unclaimByOwner = await call("POST", `/threads/${thread3}/unclaim`, {
+      name: "B",
+      id: b.json.id,
+    });
+    assert.strictEqual(unclaimByOwner.status, 200);
+
+    const claimByCAfterUnclaim = await call("POST", `/threads/${thread3}/claim`, {
+      name: "C",
+      id: c.json.id,
+    });
+    assert.strictEqual(claimByCAfterUnclaim.status, 200);
+
+    // 24. wants_role on thread creation + GET /threads?role= filter — the
+    // "request help from a role" pattern
+    const helpReq = await call("POST", "/threads", {
+      name: "D",
+      id: d.json.id,
+      title: "Need a reviewer",
+      body: "please review PR #4",
+      wants_role: "reviewer",
+    });
+    assert.strictEqual(helpReq.status, 200);
+    const helpThread = helpReq.json.thread_id;
+
+    const reviewerQueue = await call("GET", "/threads?role=reviewer&claimed=false");
+    assert.ok(reviewerQueue.json.threads.some((t: { id: number }) => t.id === helpThread));
+    const backendQueue = await call("GET", "/threads?role=backend");
+    assert.ok(!backendQueue.json.threads.some((t: { id: number }) => t.id === helpThread));
+
+    const listedHelpThread = (await call("GET", "/threads")).json.threads.find(
+      (t: { id: number }) => t.id === helpThread
+    );
+    assert.strictEqual(listedHelpThread.wants_role, "reviewer");
+
+    // 25. POST /register is rate-limited per IP (30/min) -> eventually 429
     let sawRateLimit = false;
     for (let i = 0; i < 35; i++) {
       const r = await call("POST", "/register", { name: `flood-${i}` });

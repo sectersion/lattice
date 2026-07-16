@@ -8,14 +8,17 @@ export function openDb(path: string): DatabaseSync {
     CREATE TABLE IF NOT EXISTS agents (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT UNIQUE NOT NULL,
-      secret TEXT NOT NULL
+      secret TEXT NOT NULL,
+      role TEXT
     );
 
     CREATE TABLE IF NOT EXISTS threads (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
-      created_by INTEGER NOT NULL REFERENCES agents(id)
+      created_by INTEGER NOT NULL REFERENCES agents(id),
+      claimed_by INTEGER REFERENCES agents(id),
+      wants_role TEXT
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -41,8 +44,27 @@ export function openDb(path: string): DatabaseSync {
       acked INTEGER NOT NULL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS roles (
+      name TEXT PRIMARY KEY,
+      created_by INTEGER NOT NULL REFERENCES agents(id),
+      created_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_agent_acked ON notifications(agent_id, acked);
   `);
+  // ponytail: CREATE TABLE IF NOT EXISTS doesn't add columns to a
+  // pre-existing db file — patch old databases in place.
+  for (const alter of [
+    "ALTER TABLE agents ADD COLUMN role TEXT",
+    "ALTER TABLE threads ADD COLUMN claimed_by INTEGER REFERENCES agents(id)",
+    "ALTER TABLE threads ADD COLUMN wants_role TEXT",
+  ]) {
+    try {
+      db.exec(alter);
+    } catch (err: any) {
+      if (!String(err?.message).includes("duplicate column name")) throw err;
+    }
+  }
   return db;
 }

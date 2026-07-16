@@ -61,11 +61,11 @@ require_identity() {
 
 case "$cmd" in
   register)
-    name="$1"
+    name="$1"; role="${2:-}"
     store_init
     read -r existing_id existing_secret < <(store_get "$name") || true
     existing_secret="${existing_secret%$'\r'}"
-    payload=$(python3 -c 'import json,sys; a=sys.argv[1:]; d={"name":a[0]}; d.update({"secret":a[1]} if len(a)>1 and a[1] else {}); print(json.dumps(d))' "$name" "${existing_secret:-}")
+    payload=$(python3 -c 'import json,sys; a=sys.argv[1:]; d={"name":a[0]}; d.update({"secret":a[1]} if a[1] else {}); d.update({"role":a[2]} if a[2] else {}); print(json.dumps(d))' "$name" "${existing_secret:-}" "$role")
     resp=$(curl -sS -X POST "$BASE/register" -H 'content-type: application/json' -d "$payload")
     id=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("id",""))' "$resp" 2>/dev/null || true)
     secret=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("secret",""))' "$resp" 2>/dev/null || true)
@@ -76,10 +76,19 @@ case "$cmd" in
     echo "$resp" | json
     ;;
   create)
-    name="$1"; title="$2"; body="$3"
+    name="$1"; title="$2"; body="$3"; wants_role="${4:-}"
     store_init; require_identity "$name"
-    curl -sS -X POST "$BASE/threads" -H 'content-type: application/json' \
-      -d "$(python3 -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"name":a[0],"id":int(a[1]),"title":a[2],"body":a[3]}))' "$name" "$ID" "$title" "$body")" | json
+    payload=$(python3 -c 'import json,sys; a=sys.argv[1:]; d={"name":a[0],"id":int(a[1]),"title":a[2],"body":a[3]}; d.update({"wants_role":a[4]} if a[4] else {}); print(json.dumps(d))' "$name" "$ID" "$title" "$body" "$wants_role")
+    curl -sS -X POST "$BASE/threads" -H 'content-type: application/json' -d "$payload" | json
+    ;;
+  list)
+    # list [status] [role] [claimed:true|false]
+    status="${1:-}"; role="${2:-}"; claimed="${3:-}"
+    q=""
+    [ -n "$status" ] && q="${q}&status=$status"
+    [ -n "$role" ] && q="${q}&role=$role"
+    [ -n "$claimed" ] && q="${q}&claimed=$claimed"
+    curl -sS "$BASE/threads?${q#&}" | json
     ;;
   reply)
     name="$1"; thread_id="$2"; body="$3"; link="${4:-}"
@@ -111,6 +120,24 @@ case "$cmd" in
     curl -sS -X POST "$BASE/threads/$thread_id/close" -H 'content-type: application/json' \
       -d "$(python3 -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"name":a[0],"id":int(a[1])}))' "$name" "$ID")" | json
     ;;
+  claim|unclaim)
+    name="$1"; thread_id="$2"
+    store_init; require_identity "$name"
+    curl -sS -X POST "$BASE/threads/$thread_id/$cmd" -H 'content-type: application/json' \
+      -d "$(python3 -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"name":a[0],"id":int(a[1])}))' "$name" "$ID")" | json
+    ;;
+  agents)
+    curl -sS "$BASE/agents" | json
+    ;;
+  roles)
+    curl -sS "$BASE/roles" | json
+    ;;
+  add-role)
+    name="$1"; role="$2"
+    store_init; require_identity "$name"
+    curl -sS -X POST "$BASE/roles" -H 'content-type: application/json' \
+      -d "$(python3 -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"name":a[0],"id":int(a[1]),"role":a[2]}))' "$name" "$ID" "$role")" | json
+    ;;
   notifications)
     name="$1"
     store_init; require_identity "$name"
@@ -141,7 +168,7 @@ case "$cmd" in
     echo "$resp" | json
     ;;
   *)
-    echo "usage: at.sh <register|create|reply|get|read|subscribe|unsubscribe|close|notifications|ack|ack-batch|rotate-secret> ..." >&2
+    echo "usage: at.sh <register|create|reply|get|read|list|subscribe|unsubscribe|close|claim|unclaim|agents|roles|add-role|notifications|ack|ack-batch|rotate-secret> ..." >&2
     exit 1
     ;;
 esac
