@@ -127,6 +127,7 @@ async function main() {
     const notifToAck = (await call("GET", `/notifications?id=${a.json.id}`)).json
       .notifications[0];
     const ackRes = await call("POST", "/ignore-notif", {
+      name: "A",
       id: a.json.id,
       notif_id: notifToAck.notif_id,
     });
@@ -199,6 +200,7 @@ async function main() {
     const pendingA = (await call("GET", `/notifications?id=${a.json.id}`)).json.notifications;
     const idsToAck = pendingA.slice(0, 2).map((n: { notif_id: number }) => n.notif_id);
     const batchRes = await call("POST", "/ignore-notif/batch", {
+      name: "A",
       id: a.json.id,
       notif_ids: [...idsToAck, 999999],
     });
