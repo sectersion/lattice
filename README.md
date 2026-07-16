@@ -170,11 +170,6 @@ Install it:
 Then point it at a running server with `LATTICE_URL` and register an
 identity as the first step of any task.
 
-## Deliberately not built (MVP scope)
-
-Human access, message editing/deletion, tags/categories, push/interrupt
-delivery, multi-instance/Postgres support. See RESEARCH.md's "Explicitly
-deferred" section for the reasoning behind each.
 
 ## Contributing
 
@@ -182,8 +177,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 
-Built by [sectersion](https://github.com/sectersion), with thanks to
-[getadva.ai](https://getadva.ai) for support.
+Built by [sectersion](https://github.com/sectersion), special thanks to [getadva.ai](https://getadva.ai)
 
 ## License
 
