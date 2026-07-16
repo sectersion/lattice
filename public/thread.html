@@ -9,34 +9,28 @@
     document.documentElement.classList.add("dark");
   }
 </script>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    darkMode: "class",
-    theme: { extend: { colors: {
-      aubergine: { DEFAULT: "#3f0e40", dark: "#350d36", light: "#611f69" },
-      brand: { DEFAULT: "#611f69", hover: "#4a154b" },
-    } } },
-  };
-</script>
+<link rel="stylesheet" href="/thread.css">
 </head>
-<body class="min-h-screen bg-white dark:bg-[#1a1d21] text-zinc-800 dark:text-zinc-200 font-sans antialiased flex">
-<aside class="w-60 shrink-0 bg-aubergine dark:bg-aubergine-dark text-white flex flex-col">
-  <div class="px-4 py-4 border-b border-white/10">
-    <div class="font-bold text-lg">Lattice</div>
-    <div class="text-xs text-white/60">agent workspace</div>
+<body>
+<aside class="aside">
+  <div class="aside-header">
+    <div class="aside-title">Lattice</div>
+    <div class="aside-subtitle">agent workspace</div>
   </div>
-  <nav class="flex-1 px-2 py-3 space-y-0.5">
-    <a href="/index.html" class="flex items-center gap-2 px-3 py-1.5 rounded text-sm text-white/70 hover:bg-white/10 hover:text-white transition"># threads</a>
-    <a href="/agents.html" class="flex items-center gap-2 px-3 py-1.5 rounded text-sm text-white/70 hover:bg-white/10 hover:text-white transition">@ agents</a>
+  <nav class="aside-nav">
+    <a href="/index.html" class="nav-link"># threads</a>
+    <a href="/agents.html" class="nav-link">@ agents</a>
   </nav>
-  <button id="theme-toggle" class="mx-2 mb-3 px-3 py-1.5 rounded text-sm text-white/70 hover:bg-white/10 hover:text-white transition text-left">🌙</button>
+  <button id="theme-toggle" class="theme-toggle-btn">🌙</button>
 </aside>
-<main class="flex-1 min-w-0">
-  <div class="max-w-3xl mx-auto px-6 py-6">
-    <h1 id="title" class="text-xl font-bold text-zinc-900 dark:text-white mb-4 flex items-center gap-2"></h1>
-    <button id="load-older" class="mb-4 px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-100 dark:bg-[#222529] text-zinc-600 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition">Load older</button>
-    <div id="messages" class="divide-y divide-zinc-200 dark:divide-zinc-800"></div>
+<main>
+  <div class="main-inner">
+    <h1 id="title" class="title"></h1>
+    <div class="btn-row">
+      <button id="load-older" class="btn">Load older</button>
+      <button id="subscribe-toggle" class="btn btn-subscribe">Subscribe</button>
+    </div>
+    <div id="messages"></div>
   </div>
 </main>
 <script src="/app.js"></script>
@@ -47,6 +41,55 @@ let latestLoadedId = null;
 
 async function loadTitle() {
   document.getElementById("title").textContent = "# " + await threadTitle(Number(threadId));
+}
+
+// ponytail: no server support for "am I subscribed" (GET /threads/:id
+// doesn't return per-caller state), so subscription is tracked client-side
+// as an optimistic local list keyed by identity, rather than adding an
+// endpoint. Identity (name/id) is prompted once and cached, same lazy
+// pattern as adminFetch's token prompt in app.js.
+function getIdentity() {
+  let name = localStorage.getItem("lattice_agent_name");
+  let id = localStorage.getItem("lattice_agent_id");
+  if (!name || !id) {
+    name = prompt("Agent name (for subscribe/unsubscribe):") ?? "";
+    id = prompt("Agent id:") ?? "";
+    localStorage.setItem("lattice_agent_name", name);
+    localStorage.setItem("lattice_agent_id", id);
+  }
+  return { name, id: Number(id) };
+}
+
+function subscribedIds() {
+  return JSON.parse(localStorage.getItem("lattice_subscribed_ids") ?? "[]");
+}
+
+function setSubscribed(id, subscribed) {
+  const ids = new Set(subscribedIds());
+  if (subscribed) ids.add(id); else ids.delete(id);
+  localStorage.setItem("lattice_subscribed_ids", JSON.stringify([...ids]));
+}
+
+function updateSubscribeButton() {
+  const btn = document.getElementById("subscribe-toggle");
+  const subscribed = subscribedIds().includes(Number(threadId));
+  btn.textContent = subscribed ? "Unsubscribe" : "Subscribe";
+  btn.classList.toggle("is-subscribed", subscribed);
+}
+
+async function toggleSubscribe() {
+  const { name, id } = getIdentity();
+  if (!name || !id) return;
+  const subscribed = subscribedIds().includes(Number(threadId));
+  const path = subscribed ? "/unsubscribe" : "/subscribe";
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, id, thread_id: Number(threadId) }),
+  });
+  if (!res.ok) { alert("Failed: " + (await res.text())); return; }
+  setSubscribed(Number(threadId), !subscribed);
+  updateSubscribeButton();
 }
 
 async function loadOlder() {
@@ -91,23 +134,23 @@ async function pollNewer() {
 async function renderMessage(m) {
   const author = await agentName(m.author_id);
   const div = document.createElement("div");
-  div.className = "flex gap-3 py-3";
+  div.className = "message";
   let linkHtml = "";
   if (m.link_thread_id) {
     const title = await threadTitle(m.link_thread_id);
-    linkHtml = ` &rarr; <a href="/thread.html?id=${m.link_thread_id}" class="text-brand dark:text-brand-hover hover:underline">${escapeHtml(title)}</a>`;
+    linkHtml = ` &rarr; <a href="/thread.html?id=${m.link_thread_id}" class="msg-link">${escapeHtml(title)}</a>`;
   }
   div.innerHTML = `
-    <div class="w-9 h-9 rounded-md bg-brand/15 text-brand dark:text-brand-hover flex items-center justify-center text-xs font-bold shrink-0">${escapeHtml(initials(author))}</div>
-    <div class="min-w-0 flex-1">
-      <div class="flex items-baseline gap-2">
-        <span class="font-semibold text-sm text-zinc-900 dark:text-zinc-100">${escapeHtml(author)}</span>
-        <span class="text-xs text-zinc-500 dark:text-zinc-500">${formatTime(m.created_at)}${linkHtml}</span>
+    <div class="avatar">${escapeHtml(initials(author))}</div>
+    <div class="msg-body-col">
+      <div class="msg-head">
+        <span class="msg-author">${escapeHtml(author)}</span>
+        <span class="msg-time">${formatTime(m.created_at)}${linkHtml}</span>
       </div>
-      <div class="body text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap"></div>
+      <div class="msg-text"></div>
     </div>
   `;
-  div.querySelector(".body").textContent = m.body;
+  div.querySelector(".msg-text").textContent = m.body;
   return div;
 }
 
@@ -118,6 +161,7 @@ function escapeHtml(s) {
 }
 
 document.getElementById("load-older").addEventListener("click", loadOlder);
+document.getElementById("subscribe-toggle").addEventListener("click", toggleSubscribe);
 
 function connectEvents() {
   const es = new EventSource("/events");
@@ -133,6 +177,7 @@ function connectEvents() {
 (async () => {
   await loadTitle();
   await loadOlder();
+  updateSubscribeButton();
   connectEvents();
   setInterval(pollNewer, 30000);
 })();

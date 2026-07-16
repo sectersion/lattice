@@ -1,0 +1,78 @@
+/* ponytail: hand-rolled CSS covering exactly the utility classes thread.html
+   uses, in place of the Tailwind CDN <script> (network fetch + in-browser
+   JIT on every load was the load-lag root cause). Not a general utility
+   framework — add classes here only if thread.html needs them. */
+:root {
+  --zinc-100: #f4f4f5; --zinc-200: #e4e4e7; --zinc-300: #d4d4d8;
+  --zinc-500: #71717a; --zinc-600: #52525b; --zinc-700: #3f3f46;
+  --zinc-800: #27272a; --zinc-900: #18181b;
+  --brand: #611f69; --brand-hover: #4a154b;
+  --aubergine: #3f0e40; --aubergine-dark: #350d36;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  min-height: 100vh; background: #fff; color: var(--zinc-800);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased; display: flex;
+}
+html.dark body { background: #1a1d21; color: var(--zinc-200); }
+
+.aside { width: 15rem; flex-shrink: 0; background: var(--aubergine); color: #fff; display: flex; flex-direction: column; }
+html.dark .aside { background: var(--aubergine-dark); }
+.aside-header { padding: 1rem; border-bottom: 1px solid rgba(255,255,255,.1); }
+.aside-title { font-weight: 700; font-size: 1.125rem; }
+.aside-subtitle { font-size: .75rem; color: rgba(255,255,255,.6); }
+.aside-nav { flex: 1 1 0%; padding: .75rem .5rem; display: flex; flex-direction: column; gap: .125rem; }
+.nav-link, .theme-toggle-btn {
+  display: flex; align-items: center; gap: .5rem; padding: .375rem .75rem;
+  border-radius: .25rem; font-size: .875rem; color: rgba(255,255,255,.7);
+  text-decoration: none; background: none; border: none; cursor: pointer;
+  transition: background-color .15s, color .15s; text-align: left; font: inherit;
+}
+.nav-link:hover, .theme-toggle-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
+.theme-toggle-btn { margin: 0 .5rem .75rem; }
+
+main { flex: 1 1 0%; min-width: 0; }
+.main-inner { max-width: 48rem; margin: 0 auto; padding: 1.5rem; }
+
+h1 { margin: 0; }
+.title { font-size: 1.25rem; font-weight: 700; color: var(--zinc-900); margin-bottom: 1rem; display: flex; align-items: center; gap: .5rem; }
+html.dark .title { color: #fff; }
+
+.btn {
+  padding: .375rem .75rem; border-radius: .375rem; font-size: .75rem;
+  font-weight: 500; background: var(--zinc-100); color: var(--zinc-600);
+  border: 1px solid var(--zinc-300); cursor: pointer; transition: background-color .15s;
+}
+.btn:hover { background: var(--zinc-200); }
+html.dark .btn { background: #222529; color: var(--zinc-300); border-color: var(--zinc-700); }
+html.dark .btn:hover { background: var(--zinc-800); }
+.btn-row { display: flex; gap: .5rem; margin-bottom: 1rem; }
+
+.btn-subscribe { background: var(--brand); color: #fff; border-color: var(--brand); }
+.btn-subscribe:hover { background: var(--brand-hover); }
+.btn-subscribe.is-subscribed { background: var(--zinc-100); color: var(--zinc-600); border-color: var(--zinc-300); }
+html.dark .btn-subscribe.is-subscribed { background: #222529; color: var(--zinc-300); border-color: var(--zinc-700); }
+
+#messages { border-top: 1px solid var(--zinc-200); }
+html.dark #messages { border-color: var(--zinc-800); }
+.message { display: flex; gap: .75rem; padding: .75rem 0; border-bottom: 1px solid var(--zinc-200); }
+html.dark .message { border-color: var(--zinc-800); }
+.avatar {
+  width: 2.25rem; height: 2.25rem; border-radius: .375rem;
+  background: rgba(97,31,105,.15); color: var(--brand);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .75rem; font-weight: 700; flex-shrink: 0;
+}
+html.dark .avatar { color: var(--brand-hover); }
+.msg-body-col { min-width: 0; flex: 1 1 0%; }
+.msg-head { display: flex; align-items: baseline; gap: .5rem; }
+.msg-author { font-weight: 600; font-size: .875rem; color: var(--zinc-900); }
+html.dark .msg-author { color: var(--zinc-200); }
+.msg-time { font-size: .75rem; color: var(--zinc-500); }
+.msg-link { color: var(--brand); }
+.msg-link:hover { text-decoration: underline; }
+html.dark .msg-link { color: var(--brand-hover); }
+.msg-text { font-size: .875rem; color: var(--zinc-700); white-space: pre-wrap; }
+html.dark .msg-text { color: var(--zinc-200); }
