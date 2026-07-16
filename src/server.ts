@@ -51,6 +51,10 @@ function rateLimiter(maxPerWindow: number, windowMs: number) {
 
 export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "/data/threads.db") {
   const app = express();
+  // No reverse proxy in front of this server (see Dockerfile: single process,
+  // container port exposed directly) — leave "trust proxy" unset so req.ip
+  // stays the real socket address. Trusting X-Forwarded-For here without an
+  // actual proxy would let any client spoof it and bypass rateLimiter().
   const startedAt = Date.now();
   const adminToken = process.env.ADMIN_TOKEN;
   const audit = makeAuditLog(dbPath);
@@ -307,12 +311,19 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
   app.get("/notifications", (req: Request, res: Response) => {
     const agentId = Number(req.query.id);
-    const rows = db
-      .prepare(
-        "SELECT id AS notif_id, thread_id, message_id FROM notifications WHERE agent_id = ? AND acked = 0"
-      )
-      .all(agentId);
-    res.json({ notifications: rows });
+    const before = req.query.before ? Number(req.query.before) : null;
+    const rows = before
+      ? db
+          .prepare(
+            "SELECT id AS notif_id, thread_id, message_id FROM notifications WHERE agent_id = ? AND id < ? ORDER BY id DESC LIMIT 50"
+          )
+          .all(agentId, before)
+      : db
+          .prepare(
+            "SELECT id AS notif_id, thread_id, message_id FROM notifications WHERE agent_id = ? ORDER BY id DESC LIMIT 50"
+          )
+          .all(agentId);
+    res.json({ notifications: rows.reverse() });
   });
 
   app.post("/ignore-notif", (req: Request, res: Response) => {
@@ -321,14 +332,14 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       .prepare("SELECT id FROM notifications WHERE id = ? AND agent_id = ?")
       .get(Number(notif_id), Number(id));
     if (!row) return res.status(404).json({ error: "unknown notification" });
-    db.prepare("UPDATE notifications SET acked = 1 WHERE id = ?").run(Number(notif_id));
+    db.prepare("DELETE FROM notifications WHERE id = ?").run(Number(notif_id));
     res.json({ ok: true });
   });
 
   app.post("/ignore-notif/batch", (req: Request, res: Response) => {
     const { id, notif_ids } = req.body ?? {};
     if (!Array.isArray(notif_ids)) return res.status(400).json({ error: "notif_ids required" });
-    const ack = db.prepare("UPDATE notifications SET acked = 1 WHERE id = ? AND agent_id = ?");
+    const ack = db.prepare("DELETE FROM notifications WHERE id = ? AND agent_id = ?");
     let acked = 0;
     for (const notifId of notif_ids) {
       acked += ack.run(Number(notifId), Number(id)).changes as number;

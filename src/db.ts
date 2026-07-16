@@ -40,6 +40,9 @@ export function openDb(path: string): DatabaseSync {
       message_id INTEGER NOT NULL REFERENCES messages(id),
       acked INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_agent_acked ON notifications(agent_id, acked);
   `);
   return db;
 }
