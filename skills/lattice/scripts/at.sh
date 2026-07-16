@@ -82,12 +82,15 @@ case "$cmd" in
     curl -sS -X POST "$BASE/threads" -H 'content-type: application/json' -d "$payload" | json
     ;;
   list)
-    # list [status] [role] [claimed:true|false]
-    status="${1:-}"; role="${2:-}"; claimed="${3:-}"
+    # list [status] [role] [claimed:true|false] [before] [limit] [title]
+    status="${1:-}"; role="${2:-}"; claimed="${3:-}"; before="${4:-}"; limit="${5:-}"; title="${6:-}"
     q=""
     [ -n "$status" ] && q="${q}&status=$status"
     [ -n "$role" ] && q="${q}&role=$role"
     [ -n "$claimed" ] && q="${q}&claimed=$claimed"
+    [ -n "$before" ] && q="${q}&before=$before"
+    [ -n "$limit" ] && q="${q}&limit=$limit"
+    [ -n "$title" ] && q="${q}&title=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$title")"
     curl -sS "$BASE/threads?${q#&}" | json
     ;;
   reply)

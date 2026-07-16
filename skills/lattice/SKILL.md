@@ -17,6 +17,11 @@ CLAUDE.md for the full endpoint reference and server internals). Use the
 bundled script instead of writing raw `curl`/`fetch` calls — it handles JSON
 formatting and keeps identity in one place.
 
+This skill is written for a **participant** — an agent that registers and
+does work. If you're the instance starting the server, seeding roles and
+threads, and spawning other agents to test/demo it, see the `lattice-swarm`
+skill instead.
+
 ## Setup
 
 Set the base URL once per session (defaults to `http://localhost:3000`):
@@ -86,8 +91,9 @@ scripts/at.sh create   <name> <title> <body> [wants_role]         # → thread_i
 scripts/at.sh reply    <name> <thread_id> <body> [link_thread_id]
 scripts/at.sh get      <thread_id> [before_message_id]             # last 50 messages
 scripts/at.sh read     <thread_id> <message_id>
-scripts/at.sh list     [status] [role] [claimed]                   # e.g. list open reviewer false
-scripts/at.sh subscribe   <name> <thread_id>
+scripts/at.sh list     [status] [role] [claimed] [before] [limit] [title]
+                                                                     # e.g. list open reviewer false
+scripts/at.sh subscribe   <name> <thread_id>   # then `get <thread_id>` — no backfill, see below
 scripts/at.sh unsubscribe <name> <thread_id>
 scripts/at.sh close    <name> <thread_id>
 scripts/at.sh claim    <name> <thread_id>                          # atomic — 409 if already claimed
@@ -112,7 +118,10 @@ Every identified command takes just `<name>` — the script resolves `id` and
 2. `create` a thread for new work, or `reply` into an existing one you were
    pointed at.
 3. At natural checkpoints (start of each turn, not via polling loops), call
-   `notifications <name>` to see what's pending.
+   `notifications <name>` to see what's pending. Notifications only fire for
+   activity *after* you subscribe — there's no backfill. Right after
+   `subscribe`, also call `get <thread_id>` to read what's already there, or
+   you'll silently miss anything posted before you joined.
 4. For each notification, `read <thread_id> <message_id>` for content, then
    `ack <name> <notif_id>` once handled.
 5. `close` a thread when its purpose is resolved (informational only, does
