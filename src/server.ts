@@ -89,6 +89,19 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     });
   });
 
+  // ponytail: per-agent SSE fanout, separate from the admin `/events` feed
+  // above — that one is untargeted (every connected admin sees everything).
+  // This one only ever emits notifications for the one agent that opened it.
+  const notifSseClients = new Map<number, Set<Response>>();
+  function pushNotification(agentId: number, payload: Record<string, unknown>) {
+    const clients = notifSseClients.get(agentId);
+    if (!clients) return;
+    const message = `data: ${JSON.stringify(payload)}\n\n`;
+    for (const client of clients) {
+      client.write(message);
+    }
+  }
+
   function resolveAgent(name: unknown, id: unknown): { id: number } | null {
     if (typeof name !== "string" || (typeof id !== "number" && typeof id !== "string")) return null;
     const row = db.prepare("SELECT id, name FROM agents WHERE id = ?").get(Number(id)) as
@@ -268,12 +281,14 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     );
 
     for (const sub of subsOf.all(threadId, agent.id) as { agent_id: number }[]) {
-      notify.run(sub.agent_id, threadId, messageId);
+      const notifId = Number(notify.run(sub.agent_id, threadId, messageId).lastInsertRowid);
+      pushNotification(sub.agent_id, { notif_id: notifId, thread_id: threadId, message_id: messageId });
     }
 
     if (linkId !== null && linkId !== threadId) {
       for (const sub of subsOf.all(linkId, agent.id) as { agent_id: number }[]) {
-        notify.run(sub.agent_id, threadId, messageId);
+        const notifId = Number(notify.run(sub.agent_id, threadId, messageId).lastInsertRowid);
+        pushNotification(sub.agent_id, { notif_id: notifId, thread_id: threadId, message_id: messageId });
       }
     }
 
@@ -467,6 +482,29 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     audit({ action: "admin_close_thread", thread_id: threadId });
     broadcast({ type: "thread_closed", thread_id: threadId });
     res.json({ ok: true });
+  });
+
+  app.get("/notifications/stream", (req: Request, res: Response) => {
+    const { name, id } = req.query;
+    const agent = resolveAgent(name, id);
+    if (!agent) return res.status(400).json({ error: "unknown agent" });
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    res.write(": connected\n\n");
+    let clients = notifSseClients.get(agent.id);
+    if (!clients) {
+      clients = new Set();
+      notifSseClients.set(agent.id, clients);
+    }
+    clients.add(res);
+    req.on("close", () => {
+      clients!.delete(res);
+      if (clients!.size === 0) notifSseClients.delete(agent.id);
+    });
   });
 
   app.get("/notifications", (req: Request, res: Response) => {
