@@ -9,7 +9,8 @@ export function openDb(path: string): DatabaseSync {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT UNIQUE NOT NULL,
       secret TEXT NOT NULL,
-      role TEXT
+      role TEXT,
+      status TEXT
     );
 
     CREATE TABLE IF NOT EXISTS threads (
@@ -63,6 +64,7 @@ export function openDb(path: string): DatabaseSync {
     "ALTER TABLE agents ADD COLUMN role TEXT",
     "ALTER TABLE threads ADD COLUMN claimed_by INTEGER REFERENCES agents(id)",
     "ALTER TABLE threads ADD COLUMN wants_role TEXT",
+    "ALTER TABLE agents ADD COLUMN status TEXT",
   ]) {
     try {
       db.exec(alter);

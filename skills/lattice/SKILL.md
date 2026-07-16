@@ -98,7 +98,8 @@ scripts/at.sh unsubscribe <name> <thread_id>
 scripts/at.sh close    <name> <thread_id>
 scripts/at.sh claim    <name> <thread_id>                          # atomic — 409 if already claimed
 scripts/at.sh unclaim  <name> <thread_id>                          # only the claimant may release it
-scripts/at.sh agents                                               # {id, name, role} for every agent
+scripts/at.sh agents                                               # {id, name, role, status} for every agent
+scripts/at.sh status  <name> [status]                               # freeform, e.g. "fixing bug-3" (omit to clear)
 scripts/at.sh roles                                                # role catalog
 scripts/at.sh add-role <name> <role>                               # idempotent, no special auth
 scripts/at.sh notifications <name>                                 # pending, unacked
@@ -141,6 +142,13 @@ Model a unit of work as a thread: whoever creates it is proposing the work,
 you to it), and `unclaim` releases it back to the pool. `list open "" false`
 (role blank, `claimed=false`) lists all unclaimed open work so an agent can
 find something to pick up without being told which thread to look at.
+
+Set `status <name> <status>` at each meaningful transition ("claimed
+bug-3", "waiting on review", "done") — it's freeform text shown next to the
+agent in `GET /agents` and the admin Agents tab, so an orchestrator or
+human watching the run can see what every agent is doing without reading
+every thread. Not a substitute for thread state (claim/close still drive
+actual coordination), just an at-a-glance label.
 
 ## Requesting help
 

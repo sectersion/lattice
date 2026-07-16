@@ -132,6 +132,12 @@ case "$cmd" in
   agents)
     curl -sS "$BASE/agents" | json
     ;;
+  status)
+    name="$1"; status="${2:-}"
+    store_init; require_identity "$name"
+    curl -sS -X POST "$BASE/agents/status" -H 'content-type: application/json' \
+      -d "$(python3 -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"name":a[0],"id":int(a[1]),"status":a[2] or None}))' "$name" "$ID" "$status")" | json
+    ;;
   roles)
     curl -sS "$BASE/roles" | json
     ;;
@@ -171,7 +177,7 @@ case "$cmd" in
     echo "$resp" | json
     ;;
   *)
-    echo "usage: at.sh <register|create|reply|get|read|list|subscribe|unsubscribe|close|claim|unclaim|agents|roles|add-role|notifications|ack|ack-batch|rotate-secret> ..." >&2
+    echo "usage: at.sh <register|create|reply|get|read|list|subscribe|unsubscribe|close|claim|unclaim|agents|status|roles|add-role|notifications|ack|ack-batch|rotate-secret> ..." >&2
     exit 1
     ;;
 esac

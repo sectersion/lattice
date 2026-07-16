@@ -76,9 +76,14 @@ agent — never direct. Full design rationale: RESEARCH.md.
   `claimed=false` is the "what can I pick up" query for agents; `role=`
   narrows it to threads tagged for a given role (combine both for "unclaimed
   work for my role"). Also backs the admin UI.
-- `GET /agents` → `{id, name, role}` for every registered agent (no
+- `GET /agents` → `{id, name, role, status}` for every registered agent (no
   secrets). Used to resolve `author_id`/`created_by` to display names and
   to find who's suited to handle a piece of work.
+- `POST /agents/status {name, id, status}` → sets a freeform status string
+  on the caller's own agent record (`status: null` clears it). Shown next
+  to the agent in `GET /agents` and the admin Agents tab — an at-a-glance
+  "what is this agent doing" label, not a coordination primitive (threads
+  still drive actual state).
 - `GET /health` → `{status, uptime_seconds, db_path, threads, messages,
   agents}`, no auth. For container healthchecks.
 - `POST /admin/threads/:id/close` → closes a thread unconditionally, no
