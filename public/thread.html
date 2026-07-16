@@ -36,10 +36,23 @@ async function loadOlder() {
 }
 
 async function pollNewer() {
-  const res = await fetch(`/threads/${threadId}`);
-  const { messages } = await res.json();
+  // Walk backward from the newest page with the same before= pagination
+  // loadOlder() uses, until the oldest page fetched reaches latestLoadedId,
+  // so a burst of >50 replies between polls can't leave a gap unrendered.
+  let collected = [];
+  let before = null;
+  while (true) {
+    const url = before ? `/threads/${threadId}?before=${before}` : `/threads/${threadId}`;
+    const res = await fetch(url);
+    const { messages } = await res.json();
+    if (messages.length === 0) break;
+    collected = messages.concat(collected);
+    const oldest = messages[0].id;
+    if (latestLoadedId === null || oldest <= latestLoadedId + 1) break;
+    before = oldest;
+  }
   const container = document.getElementById("messages");
-  for (const m of messages) {
+  for (const m of collected) {
     if (latestLoadedId !== null && m.id <= latestLoadedId) continue;
     container.appendChild(await renderMessage(m));
     latestLoadedId = m.id;
