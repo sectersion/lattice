@@ -69,6 +69,10 @@ async function main() {
     const notifsA = await call("GET", `/notifications?id=${a.json.id}`);
     assert.strictEqual(notifsA.json.notifications.length, 1);
 
+    // 4b. GET /notifications/count matches the pending list length
+    const countA = await call("GET", `/notifications/count?id=${a.json.id}`);
+    assert.strictEqual(countA.json.count, notifsA.json.notifications.length);
+
     // 5. C creates thread2 (auto-subscribed); B replies to thread1 with link to thread2 -> C notified
     const t2 = await call("POST", "/threads", {
       name: "C",
@@ -112,6 +116,23 @@ async function main() {
     assert.strictEqual(badReply.status, 404);
     assert.strictEqual(badReply.json.error, "unknown thread, check thread id");
 
+    // 7b. subscribe/unsubscribe on unknown thread id -> rejected same as reply
+    const badSubscribe = await call("POST", "/subscribe", {
+      name: "A",
+      id: a.json.id,
+      thread_id: 99999,
+    });
+    assert.strictEqual(badSubscribe.status, 404);
+    assert.strictEqual(badSubscribe.json.error, "unknown thread, check thread id");
+
+    const badUnsubscribe = await call("POST", "/unsubscribe", {
+      name: "A",
+      id: a.json.id,
+      thread_id: 99999,
+    });
+    assert.strictEqual(badUnsubscribe.status, 404);
+    assert.strictEqual(badUnsubscribe.json.error, "unknown thread, check thread id");
+
     // 8. GET /threads/:id pagination via before=
     const listing = await call("GET", `/threads/${thread1}`);
     assert.ok(listing.json.messages.length >= 3);
@@ -134,6 +155,13 @@ async function main() {
     assert.strictEqual(ackRes.status, 200);
     const afterAck = (await call("GET", `/notifications?id=${a.json.id}`)).json.notifications;
     assert.ok(!afterAck.some((n: { notif_id: number }) => n.notif_id === notifToAck.notif_id));
+
+    // 9b. ack every remaining notification for A -> count goes to 0
+    for (const n of afterAck) {
+      await call("POST", "/ignore-notif", { name: "A", id: a.json.id, notif_id: n.notif_id });
+    }
+    const countAfterAckAll = await call("GET", `/notifications/count?id=${a.json.id}`);
+    assert.strictEqual(countAfterAckAll.json.count, 0);
 
     // 10. close a thread -> reply after close still succeeds
     const closeRes = await call("POST", `/threads/${thread1}/close`, {
@@ -324,6 +352,17 @@ async function main() {
       // known role -> succeeds
       const goodRole = await rolesCall("POST", "/register", { name: "Impl1", role: "implementer" });
       assert.strictEqual(goodRole.status, 200);
+
+      // reconnect (correct secret) with a bogus role -> 400, stored role untouched
+      const reconnectBadRole = await rolesCall("POST", "/register", {
+        name: "Impl1",
+        secret: goodRole.json.secret,
+        role: "totally-bogus-role",
+      });
+      assert.strictEqual(reconnectBadRole.status, 400);
+      const impl1Row = await rolesCall("GET", "/agents");
+      const impl1 = impl1Row.json.agents.find((a: { name: string }) => a.name === "Impl1");
+      assert.strictEqual(impl1.role, "implementer");
     } finally {
       rolesServer.close();
       rolesDb.close();
@@ -415,6 +454,20 @@ async function main() {
       id: c.json.id,
     });
     assert.strictEqual(claimByCAfterUnclaim.status, 200);
+
+    // claim auto-subscribes: C claimed thread3 above with no prior explicit
+    // subscribe call — a reply from someone else should still notify C.
+    await call("POST", `/threads/${thread3}/reply`, {
+      name: "D",
+      id: d.json.id,
+      body: "any update?",
+    });
+    const cNotifsAfterClaim = await call("GET", `/notifications?id=${c.json.id}`);
+    assert.ok(
+      cNotifsAfterClaim.json.notifications.some(
+        (n: { thread_id: number }) => n.thread_id === thread3
+      )
+    );
 
     // 24. wants_role on thread creation + GET /threads?role= filter — the
     // "request help from a role" pattern

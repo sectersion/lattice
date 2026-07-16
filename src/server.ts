@@ -363,6 +363,8 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     const { name, id, thread_id } = req.body ?? {};
     const agent = resolveAgent(name, id);
     if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(Number(thread_id));
+    if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
     db.prepare("INSERT OR IGNORE INTO subscriptions (thread_id, agent_id) VALUES (?, ?)").run(
       Number(thread_id),
       agent.id
@@ -375,6 +377,8 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     const { name, id, thread_id } = req.body ?? {};
     const agent = resolveAgent(name, id);
     if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(Number(thread_id));
+    if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
     db.prepare("DELETE FROM subscriptions WHERE thread_id = ? AND agent_id = ?").run(
       Number(thread_id),
       agent.id
@@ -482,6 +486,15 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
           )
           .all(agentId);
     res.json({ notifications: rows.reverse() });
+  });
+
+  app.get("/notifications/count", (req: Request, res: Response) => {
+    const agentId = Number(req.query.id);
+    if (!Number.isInteger(agentId)) return res.status(400).json({ error: "invalid id" });
+    const row = db
+      .prepare("SELECT COUNT(*) AS count FROM notifications WHERE agent_id = ?")
+      .get(agentId) as { count: number };
+    res.json({ count: row.count });
   });
 
   app.post("/ignore-notif", writeLimiter, (req: Request, res: Response) => {

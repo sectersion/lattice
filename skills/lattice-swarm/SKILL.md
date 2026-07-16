@@ -22,19 +22,33 @@ and verification, and delegate participation to subagents.
 
 ## 1. Start the server
 
+Run the published Docker image (`ghcr.io/sectersion/lattice`), not
+`npm run build` — the swarm is meant to coordinate agents working in *any*
+codebase, not just this repo, so don't assume a local checkout of Lattice
+exists:
+
 ```bash
-npm run build && DB_PATH=<scratch-path> PORT=<port> node dist/index.js &
+docker run -d --name lattice-swarm -p <port>:3000 \
+  -v <scratch-dir>:/data \
+  ghcr.io/sectersion/lattice:main
 curl -s http://localhost:<port>/health   # {"status":"ok","threads":0,...}
 ```
 
-Use a scratch `DB_PATH` per test run (not the default `/data/threads.db`) so
-runs don't bleed into each other. There is no delete endpoint — to reset
-between runs, stop the server and remove the DB file, then restart.
+Use a scratch bind-mount directory per test run (not a shared one) so runs
+don't bleed into each other. There is no delete endpoint — to reset between
+runs, stop the container and remove the scratch dir's DB file, then restart:
+
+```bash
+docker rm -f lattice-swarm
+```
 
 ## 2. Seed roles and threads
 
-Register one `seeder` identity and use it for all setup calls — role catalog
-entries and thread creation both require an identified agent:
+Decide the role pipeline first — a fixed `{role: count}` map (e.g.
+`{fixer: 3, reviewer: 1}`), not something an agent improvises mid-run — then
+seed each role name from that map. Register one `seeder` identity and use it
+for all setup calls — role catalog entries and thread creation both require
+an identified agent:
 
 ```bash
 curl -s -X POST $BASE/register -d '{"name":"seeder"}'          # {id:1,...}
@@ -93,6 +107,14 @@ Always tell each worker explicitly:
   another unclaimed thread.
 - If the scenario has a review/approval handoff, workers should actually
   poll and wait for the real other agent's reply — never fabricate it.
+- **Checkpoint after claim, before doing the work**: post a short plan (or
+  a `subthread` breakdown if the work splits) to the claimed thread, then
+  do exactly one `notifications` poll before writing any code. This isn't a
+  server-enforced gate — it's an instruction, and it costs one round-trip,
+  not indefinite blocking: if nothing objects by that one poll, proceed. The
+  point is forcing a pause where a solo-fix instinct would otherwise skip
+  straight past any other agent's input, not waiting for someone who may
+  never show up.
 
 ## 5. Verify from outside the swarm
 
@@ -112,8 +134,12 @@ subscribe timing.
 
 ## 6. Tear down
 
-Stop the server process and delete the scratch DB file if you don't need
-the run's state anymore.
+```bash
+docker rm -f lattice-swarm
+```
+
+Delete the scratch bind-mount dir too if you don't need the run's state
+anymore.
 
 ## Using this with Agent tool (default)
 
@@ -132,36 +158,65 @@ script instead of loose `Agent` calls:
 - **Seed phase**: a single `agent()` call (or plain fetch via Bash before
   the workflow even starts) to register `seeder` and create roles/threads.
   This is setup, not swarm behavior — don't spend a worker agent on it.
-- **Spawn phase**: use `pipeline()`, not `parallel()`, for worker chains
-  that each do claim → plan → wait-for-review → fix — each worker's chain
-  is independent of the others' timing, so a barrier would just force
-  faster workers to wait on slower ones for no reason. Reserve `parallel()`
-  for the one place a real barrier applies: e.g. a reviewer agent that must
-  see *all* posted plans before approving any (if the scenario needs that
-  variant).
-- **Reviewer as its own stage/agent**: give it `phase: 'Review'` so it
-  groups separately in the progress tree from the fixer `phase: 'Fix'`
-  agents.
+- **The role pipeline itself is locked:** `researcher → planner →
+  implementer → validator → code-reviewer`, in that order, every run. Don't
+  ask an LLM call to invent roles or reorder stages. What the controller
+  (the main agent driving the workflow) *does* decide per run is headcount —
+  how many researchers, how many implementers, etc. — as a plain
+  `{role: count}` object at the top of the script. That object is the only
+  thing that changes between runs; feed the same map into `/roles` seeding
+  (step 2) and the spawn phase so they never drift apart.
+- **Stages are a barrier, agents within a stage are not.** Unlike the
+  flat/independent worker swarm in the fixer/reviewer example above, this
+  pipeline is genuinely sequential at the group level — planners need every
+  researcher's findings, implementers need the plan, and so on — so use
+  `parallel()` to fan out each stage's N agents and `await` it before
+  starting the next stage. Don't reach for `pipeline()` here; per-item
+  independent chains are the wrong shape when the whole *point* is that
+  stage N+1 needs stage N's combined output.
+- **Each stage gets its own `phase`** (`phase: role`) so headcount is
+  visible in the progress tree — e.g. "implementer" showing 3 agents.
+- **Hand stage output forward explicitly** — concatenate/summarize the
+  previous stage's `parallel()` results into the next stage's prompts (or
+  have agents post to a shared Lattice thread and have the next stage's
+  agents read it back) rather than relying on Lattice notifications alone
+  to carry it, since the next stage doesn't exist to subscribe until the
+  controller spawns it.
 - **Verify phase**: plain `curl`/fetch via a `log()`-only step or inline in
   the script's return value — do not spend an `agent()` call on reading
   `/threads` back, the orchestrator (you) can just do it directly after the
   workflow returns.
 
-Example shape:
+Example shape — headcount is the only knob, pipeline order is fixed:
 
 ```js
 export const meta = {
-  name: 'lattice-swarm-demo',
-  description: 'Fixer/reviewer swarm against a running Lattice server',
-  phases: [{ title: 'Fix' }, { title: 'Review' }],
+  name: 'lattice-swarm-pipeline',
+  description: 'Locked research->plan->implement->validate->review pipeline, variable headcount per stage',
+  phases: [
+    { title: 'researcher' }, { title: 'planner' }, { title: 'implementer' },
+    { title: 'validator' }, { title: 'code-reviewer' },
+  ],
 }
-const BUGS = ['bug-1', 'bug-2', 'bug-3']
-const results = await pipeline(
-  BUGS,
-  bug => agent(`Register as fixer for ${bug} against $BASE and run the claim/plan/fix cycle...`,
-    { phase: 'Fix', label: bug })
-)
-return results
+// Controller decides headcount per stage; the stage order itself never changes.
+const HEADCOUNT = { researcher: 2, planner: 1, implementer: 3, validator: 1, 'code-reviewer': 1 }
+const PIPELINE = ['researcher', 'planner', 'implementer', 'validator', 'code-reviewer']
+
+let context = 'Task: <fill in>'
+const stageResults = {}
+for (const role of PIPELINE) {
+  const n = HEADCOUNT[role]
+  const agents = await parallel(
+    Array.from({ length: n }, (_, i) =>
+      () => agent(`Register as ${role}-${i + 1} with role ${role} against $BASE. Prior stage output:\n${context}\n` +
+        `Before doing the work: claim your thread, post your plan (or split it into sub-threads if it decomposes), ` +
+        `do one notifications poll, then proceed if nothing objects.`,
+        { phase: role, label: `${role}-${i + 1}` }))
+  )
+  stageResults[role] = agents.filter(Boolean)
+  context = stageResults[role].join('\n---\n')
+}
+return stageResults
 ```
 
 Keep worker prompts self-contained in the script too — same rule as the
