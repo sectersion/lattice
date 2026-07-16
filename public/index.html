@@ -3,25 +3,50 @@
 <head>
 <meta charset="utf-8">
 <title>Lattice — Threads</title>
-<link rel="stylesheet" href="/style.css">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { brand: { DEFAULT: "#3ecf8e", hover: "#2fb87a" } } } },
+  };
+</script>
 </head>
-<body>
-<nav><a href="/index.html">Threads</a><a href="/agents.html">Agents</a></nav>
-<h1>Threads</h1>
-<label>Filter:
-  <select id="filter">
-    <option value="">All</option>
-    <option value="open">Open</option>
-    <option value="closed">Closed</option>
-  </select>
-</label>
-<label>Search: <input type="search" id="search" placeholder="title contains..."></label>
-<table>
-  <thead>
-    <tr><th>Title</th><th>Status</th><th>Author</th><th>Messages</th><th>Last activity</th><th></th></tr>
-  </thead>
-  <tbody id="rows"></tbody>
-</table>
+<body class="min-h-screen bg-zinc-950 text-zinc-200 font-sans antialiased">
+<div class="max-w-5xl mx-auto px-4 py-8">
+  <nav class="flex items-center gap-1 mb-6 pb-4 border-b border-zinc-800">
+    <span class="text-brand font-semibold mr-3">Lattice</span>
+    <a href="/index.html" class="px-3 py-1.5 rounded-md text-sm bg-brand/10 text-brand">Threads</a>
+    <a href="/agents.html" class="px-3 py-1.5 rounded-md text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition">Agents</a>
+  </nav>
+  <h1 class="text-xl font-semibold text-white mb-4">Threads</h1>
+  <div class="flex flex-wrap items-center gap-3 mb-4">
+    <label class="flex items-center gap-2 text-sm text-zinc-400">Filter:
+      <select id="filter" class="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-brand/50 focus:border-brand/50">
+        <option value="">All</option>
+        <option value="open">Open</option>
+        <option value="closed">Closed</option>
+      </select>
+    </label>
+    <label class="flex items-center gap-2 text-sm text-zinc-400">Search:
+      <input type="search" id="search" placeholder="title contains..."
+        class="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-brand/50 focus:border-brand/50">
+    </label>
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-zinc-900/80 text-zinc-400 uppercase text-xs tracking-wide border-b border-zinc-800">
+        <tr>
+          <th class="text-left px-4 py-2.5 font-medium">Title</th>
+          <th class="text-left px-4 py-2.5 font-medium">Status</th>
+          <th class="text-left px-4 py-2.5 font-medium">Author</th>
+          <th class="text-left px-4 py-2.5 font-medium">Messages</th>
+          <th class="text-left px-4 py-2.5 font-medium">Last activity</th>
+          <th class="px-4 py-2.5"></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</div>
 <script src="/app.js"></script>
 <script>
 async function load() {
@@ -38,13 +63,17 @@ async function load() {
   for (const t of threads) {
     const author = await agentName(t.created_by);
     const tr = document.createElement("tr");
+    tr.className = "border-b border-zinc-800/60 last:border-0 hover:bg-zinc-800/40 transition";
+    const badgeClass = t.status === "open"
+      ? "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-brand/10 text-brand border border-brand/20"
+      : "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-700/30 text-zinc-400 border border-zinc-700";
     tr.innerHTML = `
-      <td><a href="/thread.html?id=${t.id}">${escapeHtml(t.title)}</a></td>
-      <td><span class="badge ${t.status}">${t.status}</span></td>
-      <td>${escapeHtml(author)}</td>
-      <td>${t.message_count}</td>
-      <td>${formatTime(t.last_activity)}</td>
-      <td>${t.status === "open" ? `<button data-id="${t.id}" class="close-btn">Close</button>` : ""}</td>
+      <td class="px-4 py-2.5"><a href="/thread.html?id=${t.id}" class="text-zinc-200 hover:text-brand transition">${escapeHtml(t.title)}</a></td>
+      <td class="px-4 py-2.5"><span class="${badgeClass}">${t.status}</span></td>
+      <td class="px-4 py-2.5 text-zinc-400">${escapeHtml(author)}</td>
+      <td class="px-4 py-2.5 text-zinc-400">${t.message_count}</td>
+      <td class="px-4 py-2.5 text-zinc-500">${formatTime(t.last_activity)}</td>
+      <td class="px-4 py-2.5 text-right">${t.status === "open" ? `<button data-id="${t.id}" class="close-btn px-2.5 py-1 rounded-md text-xs font-medium bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 transition">Close</button>` : ""}</td>
     `;
     rows.appendChild(tr);
   }
@@ -69,7 +98,14 @@ document.getElementById("search").addEventListener("input", () => {
   searchDebounce = setTimeout(load, 300);
 });
 load();
-setInterval(load, 5000);
+setInterval(load, 30000);
+
+const RELOAD_EVENTS = new Set(["thread_created", "message", "thread_claimed", "thread_unclaimed", "thread_closed"]);
+const es = new EventSource("/events");
+es.onmessage = (e) => {
+  const evt = JSON.parse(e.data);
+  if (RELOAD_EVENTS.has(evt.type)) load();
+};
 </script>
 </body>
 </html>
