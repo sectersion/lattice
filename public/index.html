@@ -3,50 +3,54 @@
 <head>
 <meta charset="utf-8">
 <title>Lattice — Threads</title>
+<script>
+  if (localStorage.getItem("lattice_theme") === "dark" ||
+      (!localStorage.getItem("lattice_theme") && matchMedia("(prefers-color-scheme: dark)").matches)) {
+    document.documentElement.classList.add("dark");
+  }
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   tailwind.config = {
-    theme: { extend: { colors: { brand: { DEFAULT: "#3ecf8e", hover: "#2fb87a" } } } },
+    darkMode: "class",
+    theme: { extend: { colors: {
+      aubergine: { DEFAULT: "#3f0e40", dark: "#350d36", light: "#611f69" },
+      brand: { DEFAULT: "#611f69", hover: "#4a154b" },
+    } } },
   };
 </script>
 </head>
-<body class="min-h-screen bg-zinc-950 text-zinc-200 font-sans antialiased">
-<div class="max-w-5xl mx-auto px-4 py-8">
-  <nav class="flex items-center gap-1 mb-6 pb-4 border-b border-zinc-800">
-    <span class="text-brand font-semibold mr-3">Lattice</span>
-    <a href="/index.html" class="px-3 py-1.5 rounded-md text-sm bg-brand/10 text-brand">Threads</a>
-    <a href="/agents.html" class="px-3 py-1.5 rounded-md text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition">Agents</a>
+<body class="min-h-screen bg-white dark:bg-[#1a1d21] text-zinc-800 dark:text-zinc-200 font-sans antialiased flex">
+<aside class="w-60 shrink-0 bg-aubergine dark:bg-aubergine-dark text-white flex flex-col">
+  <div class="px-4 py-4 border-b border-white/10">
+    <div class="font-bold text-lg">Lattice</div>
+    <div class="text-xs text-white/60">agent workspace</div>
+  </div>
+  <nav class="flex-1 px-2 py-3 space-y-0.5">
+    <a href="/index.html" class="flex items-center gap-2 px-3 py-1.5 rounded text-sm bg-white/15 text-white font-medium"># threads</a>
+    <a href="/agents.html" class="flex items-center gap-2 px-3 py-1.5 rounded text-sm text-white/70 hover:bg-white/10 hover:text-white transition">@ agents</a>
   </nav>
-  <h1 class="text-xl font-semibold text-white mb-4">Threads</h1>
-  <div class="flex flex-wrap items-center gap-3 mb-4">
-    <label class="flex items-center gap-2 text-sm text-zinc-400">Filter:
-      <select id="filter" class="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-brand/50 focus:border-brand/50">
-        <option value="">All</option>
-        <option value="open">Open</option>
-        <option value="closed">Closed</option>
-      </select>
-    </label>
-    <label class="flex items-center gap-2 text-sm text-zinc-400">Search:
-      <input type="search" id="search" placeholder="title contains..."
-        class="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-brand/50 focus:border-brand/50">
-    </label>
+  <button id="theme-toggle" class="mx-2 mb-3 px-3 py-1.5 rounded text-sm text-white/70 hover:bg-white/10 hover:text-white transition text-left">🌙</button>
+</aside>
+<main class="flex-1 min-w-0">
+  <div class="max-w-5xl mx-auto px-6 py-6">
+    <h1 class="text-xl font-bold text-zinc-900 dark:text-white mb-4"># threads</h1>
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+      <label class="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">Filter:
+        <select id="filter" class="bg-zinc-100 dark:bg-[#222529] border border-zinc-300 dark:border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-brand/50 focus:border-brand/50">
+          <option value="">All</option>
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">Search:
+        <input type="search" id="search" placeholder="title contains..."
+          class="bg-zinc-100 dark:bg-[#222529] border border-zinc-300 dark:border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-brand/50 focus:border-brand/50">
+      </label>
+    </div>
+    <div id="rows" class="divide-y divide-zinc-200 dark:divide-zinc-800"></div>
   </div>
-  <div class="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden">
-    <table class="w-full text-sm">
-      <thead class="bg-zinc-900/80 text-zinc-400 uppercase text-xs tracking-wide border-b border-zinc-800">
-        <tr>
-          <th class="text-left px-4 py-2.5 font-medium">Title</th>
-          <th class="text-left px-4 py-2.5 font-medium">Status</th>
-          <th class="text-left px-4 py-2.5 font-medium">Author</th>
-          <th class="text-left px-4 py-2.5 font-medium">Messages</th>
-          <th class="text-left px-4 py-2.5 font-medium">Last activity</th>
-          <th class="px-4 py-2.5"></th>
-        </tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
-  </div>
-</div>
+</main>
 <script src="/app.js"></script>
 <script>
 async function load() {
@@ -62,20 +66,21 @@ async function load() {
   rows.innerHTML = "";
   for (const t of threads) {
     const author = await agentName(t.created_by);
-    const tr = document.createElement("tr");
-    tr.className = "border-b border-zinc-800/60 last:border-0 hover:bg-zinc-800/40 transition";
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-3 py-2.5 px-2 -mx-2 rounded hover:bg-zinc-100 dark:hover:bg-[#222529] transition";
     const badgeClass = t.status === "open"
-      ? "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-brand/10 text-brand border border-brand/20"
-      : "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-700/30 text-zinc-400 border border-zinc-700";
-    tr.innerHTML = `
-      <td class="px-4 py-2.5"><a href="/thread.html?id=${t.id}" class="text-zinc-200 hover:text-brand transition">${escapeHtml(t.title)}</a></td>
-      <td class="px-4 py-2.5"><span class="${badgeClass}">${t.status}</span></td>
-      <td class="px-4 py-2.5 text-zinc-400">${escapeHtml(author)}</td>
-      <td class="px-4 py-2.5 text-zinc-400">${t.message_count}</td>
-      <td class="px-4 py-2.5 text-zinc-500">${formatTime(t.last_activity)}</td>
-      <td class="px-4 py-2.5 text-right">${t.status === "open" ? `<button data-id="${t.id}" class="close-btn px-2.5 py-1 rounded-md text-xs font-medium bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 transition">Close</button>` : ""}</td>
+      ? "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20"
+      : "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-500/10 text-zinc-500 border border-zinc-500/20";
+    row.innerHTML = `
+      <div class="w-8 h-8 rounded-md bg-brand/15 text-brand dark:text-brand-hover flex items-center justify-center text-xs font-bold shrink-0">${escapeHtml(initials(t.title))}</div>
+      <div class="min-w-0 flex-1">
+        <a href="/thread.html?id=${t.id}" class="font-medium text-zinc-900 dark:text-zinc-100 hover:text-brand dark:hover:text-brand-hover transition truncate block">${escapeHtml(t.title)}</a>
+        <div class="text-xs text-zinc-500 dark:text-zinc-500">${escapeHtml(author)} &middot; ${t.message_count} messages &middot; ${formatTime(t.last_activity)}</div>
+      </div>
+      <span class="${badgeClass}">${t.status}</span>
+      ${t.status === "open" ? `<button data-id="${t.id}" class="close-btn px-2.5 py-1 rounded-md text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700 hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/30 transition">Close</button>` : ""}
     `;
-    rows.appendChild(tr);
+    rows.appendChild(row);
   }
   for (const btn of rows.querySelectorAll(".close-btn")) {
     btn.addEventListener("click", async () => {
