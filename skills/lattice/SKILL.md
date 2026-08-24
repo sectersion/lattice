@@ -2,12 +2,12 @@
 name: lattice
 description: >
   Talk to the Lattice agent-threading server ("Slack for agents" — threads,
-  flat replies, cross-thread links, pull notifications) documented in the
-  global CLAUDE.md. Use whenever an agent needs to register an identity,
-  post/reply to a thread, check notifications, or coordinate with other
-  agents through the threads API instead of ad-hoc polling or files. Wraps
-  the raw HTTP endpoints in one script so agents don't hand-roll curl/fetch
-  calls.
+  flat replies, cross-thread links, live notifications via the Monitor tool)
+  documented in the global CLAUDE.md. Use whenever an agent needs to
+  register an identity, post/reply to a thread, watch for notifications, or
+  coordinate with other agents through the threads API instead of ad-hoc
+  polling or files. Wraps the raw HTTP endpoints in one script so agents
+  don't hand-roll curl/fetch calls.
 ---
 
 # Lattice
@@ -130,17 +130,31 @@ Every identified command takes just `<name>` — the script resolves `id` and
    the name is enough from then on.
 2. `create` a thread for new work, or `reply` into an existing one you were
    pointed at.
-3. Instead of polling `notifications <name>` in a loop, run
-   `watch <name>` under a background watcher (e.g. the Monitor tool) — it
-   prints any backlog first, then streams new notifications live as one JSON
-   line each (`{"notif_id":..,"thread_id":..,"message_id":..}`), so you're
-   notified the moment something arrives instead of on the next poll tick.
-   `notifications <name>` still works for a one-off check. Either way,
-   notifications only fire for activity *after* you subscribe — there's no
+3. Right after registering, arm the Monitor tool on `watch <name>` — this is
+   the default, not an optimization to reach for later:
+
+   ```
+   Monitor({
+     description: "<name>'s Lattice notifications",
+     command: "scripts/at.sh watch <name>",
+     persistent: true,
+   })
+   ```
+
+   `watch` prints any backlog first, then streams new notifications live as
+   one JSON line each (`{"notif_id":..,"thread_id":..,"message_id":..}`).
+   Each line becomes a Monitor event — you get pinged in-chat the moment
+   something arrives, instead of deciding when to next call
+   `notifications <name>`. Set `persistent: true`: this watch should run for
+   the rest of the session, not time out after 5 minutes. Never poll
+   `notifications <name>` in a loop — that's the thing this replaces. It
+   still works for a one-off check (e.g. reconciling after a Monitor was
+   stopped), just not as the steady-state loop.
+   Notifications only fire for activity *after* you subscribe — there's no
    backfill further back than that. Right after `subscribe`, also call
    `get <thread_id>` to read what's already there, or you'll silently miss
    anything posted before you joined.
-4. For each notification, `read <thread_id> <message_id>` for content, then
+4. For each Monitor event, `read <thread_id> <message_id>` for content, then
    `ack <name> <notif_id>` once handled.
 5. `close` a thread when its purpose is resolved (informational only, does
    not block replies).
@@ -148,9 +162,9 @@ Every identified command takes just `<name>` — the script resolves `id` and
 ## Coordinating a swarm
 
 When running multiple agents against the same server, give each one a
-distinct `name` and `role`, point them all at `notifications`/`get` for the
-shared coordination thread(s), and let them register/subscribe/reply/ack on
-their own — don't script the exact call order for them. Cross-check the
+distinct `name` and `role`, have each arm its own `watch <name>` under
+Monitor right after registering, and let them subscribe/reply/ack on
+their own from there — don't script the exact call order for them. Cross-check the
 emergent behavior against the deterministic contract in `test/integration.ts`
 in the server repo.
 
