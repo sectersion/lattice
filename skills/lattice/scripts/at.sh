@@ -46,15 +46,31 @@ except Exception:
 d[name] = {"id": int(agent_id), "secret": secret}
 with open(path, "w") as f:
     json.dump(d, f, indent=2)
-' "$1" "$2" "$3" "$STORE_FILE"
+' "$1" "$2" "$3" "$STORE_FILE" || {
+    echo "WARNING: server accepted identity '$1' but persisting it to $STORE_FILE failed (read-only dir? full disk?)." >&2
+    echo "  Writes will fail with \"unknown name\" until this is fixed. Fix the store location (LATTICE_DIR), then re-run 'register $1' to recover." >&2
+    return 1
+  }
 }
 
 require_identity() {
-  # sets ID and SECRET globals for a known name, or errors out
+  # sets ID and SECRET globals for a known name, or errors out.
+  # SECRET may be empty: the server's write path authenticates on name+id
+  # only, so a secretless (recovered) identity can post, claim, subscribe...
+  # Commands that actually SEND the secret (rotate-secret) must use
+  # require_identity_with_secret instead.
   read -r ID SECRET < <(store_get "$1")
   ID="${ID%$'\r'}"; SECRET="${SECRET%$'\r'}"
   if [ -z "${ID:-}" ]; then
     echo "unknown name '$1' — run 'register $1' first (in this directory)" >&2
+    exit 1
+  fi
+}
+
+require_identity_with_secret() {
+  require_identity "$1"
+  if [ -z "${SECRET:-}" ]; then
+    echo "no stored secret for '$1' — this command sends the secret, which was lost. Ask an admin to reset the agent server-side." >&2
     exit 1
   fi
 }
@@ -71,7 +87,13 @@ case "$cmd" in
     secret=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("secret",""))' "$resp" 2>/dev/null || true)
     id="${id%$'\r'}"; secret="${secret%$'\r'}"
     if [ -n "$id" ] && [ -n "$secret" ]; then
-      store_set "$name" "$id" "$secret"
+      store_set "$name" "$id" "$secret" || true
+    elif [ -n "$id" ] && [ -z "$secret" ]; then
+      # 409 name-taken now carries the id (#16): reconstruct a secretless
+      # identity. The server's write path checks name+id only, so posting
+      # works; only rotate-secret (which sends the secret) stays blocked.
+      store_set "$name" "$id" "" || true
+      echo "note: secret unknown for '$name' (name taken by this identity). stored id-only: write commands work; rotate-secret does not." >&2
     fi
     echo "$resp" | json
     ;;
@@ -197,13 +219,13 @@ for n in json.load(sys.stdin)["notifications"]:
     ;;
   rotate-secret)
     name="$1"
-    store_init; require_identity "$name"
+    store_init; require_identity_with_secret "$name"
     resp=$(curl -sS -X POST "$BASE/agents/rotate-secret" -H 'content-type: application/json' \
       -d "$(python3 -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"name":a[0],"id":int(a[1]),"secret":a[2]}))' "$name" "$ID" "$SECRET")")
     new_secret=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("secret",""))' "$resp" 2>/dev/null || true)
     new_secret="${new_secret%$'\r'}"
     if [ -n "$new_secret" ]; then
-      store_set "$name" "$ID" "$new_secret"
+      store_set "$name" "$ID" "$new_secret" || true
     fi
     echo "$resp" | json
     ;;

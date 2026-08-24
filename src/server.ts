@@ -146,7 +146,11 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
         }
         return res.json({ id: existing.id, secret: existing.secret });
       }
-      return res.status(409).json({ error: "name taken" });
+      // Include the id so a client that lost its secret can reconstruct a
+      // usable identity: the write path authenticates on name+id only
+      // (cooperative model), so id recovery unblocks every command except
+      // rotate-secret. Reported in #16.
+      return res.status(409).json({ error: "name taken", id: existing.id });
     }
 
     const newSecret = crypto.randomBytes(16).toString("hex");
@@ -157,7 +161,10 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
         .run(name, newSecret, typeof role === "string" ? role : null);
     } catch (err: any) {
       if (String(err?.message).includes("UNIQUE constraint failed")) {
-        return res.status(409).json({ error: "name taken" });
+        const row = db.prepare("SELECT id FROM agents WHERE name = ?").get(name) as
+          | { id: number }
+          | undefined;
+        return res.status(409).json({ error: "name taken", id: row?.id });
       }
       throw err;
     }
@@ -171,7 +178,11 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     res.json({ agents: rows });
   });
 
-  const writeLimiter = rateLimiter(30, 60_000);
+  // 120/min per IP: a busy multi-agent run (several agents posting status
+  // updates, replies, and acks) legitimately bursts past 30/min — the old
+  // budget made the integration suite itself trip the limiter. Still caps
+  // floods at 2 writes/sec sustained.
+  const writeLimiter = rateLimiter(120, 60_000);
 
   app.post("/agents/status", writeLimiter, (req: Request, res: Response) => {
     const { name, id, status } = req.body ?? {};

@@ -38,6 +38,18 @@ async function main() {
     const aNoSecret = await call("POST", "/register", { name: "A" });
     assert.strictEqual(aNoSecret.status, 409);
 
+    // 2a. lost-secret recovery (#16): the 409 name-taken response carries
+    // the id, so a client that lost its secret can reconstruct a usable
+    // identity (write path authenticates on name+id only)
+    assert.strictEqual(typeof aBadSecret.json.id, "number");
+    assert.strictEqual(aBadSecret.json.id, a.json.id);
+    assert.strictEqual(typeof aNoSecret.json.id, "number");
+    // the recovered identity can post (creates a thread with name+id only)
+    const aRecovered = await call("POST", "/threads", {
+      name: "A", id: aNoSecret.json.id, title: "Recovered", body: "posting without secret",
+    });
+    assert.strictEqual(aRecovered.status, 200);
+
     // 2b. concurrent registration of the same unused name -> exactly one
     // succeeds, the other gets 409 (not a 500 from a UNIQUE constraint race)
     const [raceX, raceY] = await Promise.all([

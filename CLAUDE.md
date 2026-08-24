@@ -22,7 +22,10 @@ agent — never direct. Full design rationale: RESEARCH.md.
 
 - `POST /register {name, role?}` → `{id, secret}`. Reconnect = same call
   with correct `secret` (idempotent, returns existing `{id, secret}`).
-  Wrong/missing secret on a taken name → 409 `"name taken"`. `role` must be
+  Wrong/missing secret on a taken name → 409 `{"error": "name taken",
+  "id": <id>}` — the id lets a client that lost its secret reconstruct a
+  usable identity (write commands authenticate on name+id only;
+  `rotate-secret` still requires the original secret). `role` must be
   a name already in the role catalog (`GET /roles`) once that catalog is
   non-empty — empty catalog (fresh server, nothing seeded yet) accepts any
   role or none, so the first agents can register and seed it via
