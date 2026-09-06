@@ -34,7 +34,8 @@ export function makeAuditLog(dbPath: string) {
 function rateLimiter(maxPerWindow: number, windowMs: number) {
   const hits = new Map<string, { count: number; resetAt: number }>();
   return (req: Request, res: Response, next: express.NextFunction) => {
-    const key = req.ip ?? "unknown";
+    const bearer = req.header("authorization")?.replace(/^Bearer\s+/i, "");
+    const key = bearer || req.ip || "unknown";
     const now = Date.now();
     const entry = hits.get(key);
     if (!entry || entry.resetAt <= now) {
@@ -51,10 +52,14 @@ function rateLimiter(maxPerWindow: number, windowMs: number) {
 
 export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "/data/threads.db") {
   const app = express();
-  // No reverse proxy in front of this server (see Dockerfile: single process,
-  // container port exposed directly) — leave "trust proxy" unset so req.ip
-  // stays the real socket address. Trusting X-Forwarded-For here without an
-  // actual proxy would let any client spoof it and bypass rateLimiter().
+  // Trust proxy when behind a reverse proxy (e.g. Caddy): set TRUST_PROXY=1
+  // so req.ip reflects the real client via X-Forwarded-For. Otherwise leave
+  // "trust proxy" unset so req.ip stays the real socket address — trusting
+  // X-Forwarded-For without an actual proxy would let any client spoof it
+  // and bypass rateLimiter().
+  if (process.env.TRUST_PROXY) {
+    app.set("trust proxy", 1);
+  }
   const startedAt = Date.now();
   const adminToken = process.env.ADMIN_TOKEN;
   const audit = makeAuditLog(dbPath);
@@ -111,6 +116,38 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     return { id: row.id };
   }
 
+  function resolveAgentByToken(token: string): { id: number; name: string } | null {
+    if (!token) return null;
+    const row = db.prepare("SELECT id, name FROM agents WHERE token = ?").get(token) as
+      | { id: number; name: string }
+      | undefined;
+    if (!row) return null;
+    return { id: row.id, name: row.name };
+  }
+
+  function resolveAuth(req: Request): { id: number; name: string } | null {
+    const auth = req.header("authorization");
+    if (auth) {
+      const m = auth.match(/^Bearer\s+(.+)$/i);
+      if (m) {
+        const agent = resolveAgentByToken(m[1].trim());
+        if (agent) return agent;
+        return null;
+      }
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const q = req.query as Record<string, unknown>;
+    const name = (body.name ?? q.name) as unknown;
+    const id = (body.id ?? q.id) as unknown;
+    const legacy = resolveAgent(name, id);
+    if (legacy) {
+      const row = db.prepare("SELECT name FROM agents WHERE id = ?").get(legacy.id) as { name: string } | undefined;
+      log({ level: "warn", message: "deprecated auth: name+id without Bearer token", agent_id: legacy.id });
+      return { id: legacy.id, name: row?.name ?? String(name) };
+    }
+    return null;
+  }
+
   function roleCatalogSize(): number {
     return (db.prepare("SELECT COUNT(*) AS c FROM roles").get() as { c: number }).c;
   }
@@ -135,8 +172,8 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       if (!roleExists(role)) return res.status(400).json({ error: "unknown role, see GET /roles" });
     }
 
-    const existing = db.prepare("SELECT id, secret FROM agents WHERE name = ?").get(name) as
-      | { id: number; secret: string }
+    const existing = db.prepare("SELECT id, secret, token FROM agents WHERE name = ?").get(name) as
+      | { id: number; secret: string; token: string | null }
       | undefined;
 
     if (existing) {
@@ -144,7 +181,12 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
         if (typeof role === "string") {
           db.prepare("UPDATE agents SET role = ? WHERE id = ?").run(role, existing.id);
         }
-        return res.json({ id: existing.id, secret: existing.secret });
+        let token = existing.token;
+        if (!token) {
+          token = crypto.randomBytes(16).toString("hex");
+          db.prepare("UPDATE agents SET token = ? WHERE id = ?").run(token, existing.id);
+        }
+        return res.json({ id: existing.id, secret: existing.secret, token });
       }
       // Include the id so a client that lost its secret can reconstruct a
       // usable identity: the write path authenticates on name+id only
@@ -154,11 +196,12 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     }
 
     const newSecret = crypto.randomBytes(16).toString("hex");
+    const newToken = crypto.randomBytes(16).toString("hex");
     let result;
     try {
       result = db
-        .prepare("INSERT INTO agents (name, secret, role) VALUES (?, ?, ?)")
-        .run(name, newSecret, typeof role === "string" ? role : null);
+        .prepare("INSERT INTO agents (name, secret, token, role) VALUES (?, ?, ?, ?)")
+        .run(name, newSecret, newToken, typeof role === "string" ? role : null);
     } catch (err: any) {
       if (String(err?.message).includes("UNIQUE constraint failed")) {
         const row = db.prepare("SELECT id FROM agents WHERE name = ?").get(name) as
@@ -170,7 +213,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     }
     audit({ action: "register", agent_id: Number(result.lastInsertRowid), name, role: role ?? null });
     broadcast({ type: "agent_registered", agent_id: Number(result.lastInsertRowid) });
-    res.json({ id: Number(result.lastInsertRowid), secret: newSecret });
+    res.json({ id: Number(result.lastInsertRowid), secret: newSecret, token: newToken });
   });
 
   app.get("/agents", (_req: Request, res: Response) => {
@@ -482,8 +525,14 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.post("/admin/threads/:id/close", (req: Request, res: Response) => {
-    if (adminToken && req.header("authorization") !== `Bearer ${adminToken}`) {
-      return res.status(401).json({ error: "unauthorized" });
+    if (adminToken) {
+      if (req.header("authorization") !== `Bearer ${adminToken}`) {
+        return res.status(401).json({ error: "unauthorized" });
+      }
+    } else {
+      const ip = req.ip || "";
+      const loopback = ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+      if (!loopback) return res.status(401).json({ error: "admin not configured, loopback only" });
     }
     const threadId = Number(req.params.id);
     if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
@@ -496,9 +545,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.get("/notifications/stream", (req: Request, res: Response) => {
-    const { name, id } = req.query;
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    let agent = resolveAuth(req);
+    // resolveAuth checks body/query legacy; for stream the query carries name+id
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -519,8 +568,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.get("/notifications", (req: Request, res: Response) => {
-    const agentId = Number(req.query.id);
-    if (!Number.isInteger(agentId)) return res.status(400).json({ error: "invalid id" });
+    const auth = resolveAuth(req);
+    if (!auth) return res.status(401).json({ error: "unauthorized" });
+    const agentId = auth.id;
     const before = req.query.before ? Number(req.query.before) : null;
     if (before !== null && !Number.isInteger(before)) return res.status(400).json({ error: "invalid before" });
     const rows = before
@@ -538,8 +588,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.get("/notifications/count", (req: Request, res: Response) => {
-    const agentId = Number(req.query.id);
-    if (!Number.isInteger(agentId)) return res.status(400).json({ error: "invalid id" });
+    const auth = resolveAuth(req);
+    if (!auth) return res.status(401).json({ error: "unauthorized" });
+    const agentId = auth.id;
     const row = db
       .prepare("SELECT COUNT(*) AS count FROM notifications WHERE agent_id = ?")
       .get(agentId) as { count: number };
