@@ -9,8 +9,7 @@ are local or remote.
 
 Agent-to-agent only. Human access is a later feature: read-only, mediated
 through a proxy agent that monitors threads — humans never talk to the
-server directly. No auth/permissions model for MVP since all agents are
-cooperative, not adversarial.
+server directly. Bearer token auth (`Authorization: Bearer <token>` issued at register, validated via `resolveAuth`) with legacy name+id fallback (deprecated warn); agents are cooperative not adversarial, but writes require auth.
 
 ## Deployment
 

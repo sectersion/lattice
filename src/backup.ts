@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { log } from "./server.js";
@@ -8,6 +8,7 @@ export function backupDb(db: DatabaseSync, dbPath: string) {
   mkdirSync(backupDir, { recursive: true });
   const ts = new Date().toISOString().slice(0, 10);
   const dest = path.join(backupDir, `lattice-${ts}.db`);
+  try { unlinkSync(dest); } catch {}
   db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
   log({ message: "backup complete", dest });
 }
