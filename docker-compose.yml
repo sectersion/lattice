@@ -11,6 +11,11 @@ services:
       - lattice-data:/data
     expose:
       - "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

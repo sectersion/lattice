@@ -25,13 +25,15 @@ function scheduleDailyBackup() {
     }
   };
   // every 24h
-  setInterval(doBackup, 24 * 60 * 60 * 1000);
+  const iv = setInterval(doBackup, 24 * 60 * 60 * 1000);
+  if (typeof (iv as unknown as { unref?: () => unknown }).unref === "function") (iv as unknown as { unref: () => void }).unref();
   // also fire at next 02:00 UTC, then daily cadence covers it after
   const now = new Date();
   const next02 = new Date(now);
   next02.setUTCHours(2, 0, 0, 0);
   if (next02 <= now) next02.setUTCDate(next02.getUTCDate() + 1);
-  setTimeout(doBackup, next02.getTime() - now.getTime());
+  const to = setTimeout(doBackup, next02.getTime() - now.getTime());
+  if (typeof (to as unknown as { unref?: () => unknown }).unref === "function") (to as unknown as { unref: () => void }).unref();
 }
 scheduleDailyBackup();
 

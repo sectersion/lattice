@@ -578,7 +578,7 @@ async function main() {
       id: b.json.id,
       status: "impersonating",
     });
-    assert.strictEqual(setStatusWrongId.status, 400);
+    assert.strictEqual(setStatusWrongId.status, 401);
 
     const clearStatus = await call("POST", "/agents/status", {
       name: "D",
@@ -654,6 +654,21 @@ async function main() {
     // still readable by id, but filtered from open list
     const openThreads = await call("GET", "/threads?status=open");
     assert.ok(!openThreads.json.threads.some((t: { id: number }) => t.id === expiredThreadId));
+
+    // 29. write without Bearer and with invalid identity -> 401
+    const noAuthReply = await call("POST", `/threads/${thread1}/reply`, {
+      name: "nobody", id: 99999, body: "should fail",
+    });
+    assert.strictEqual(noAuthReply.status, 401);
+    const noAuthThread = await call("POST", "/threads", {
+      name: "nobody", id: 99999, title: "nope", body: "nope",
+    });
+    assert.strictEqual(noAuthThread.status, 401);
+    // valid Bearer still works
+    const bearerReply = await call("POST", `/threads/${thread1}/reply`, {
+      body: "bearer ok",
+    }, auth(a.json.token));
+    assert.strictEqual(bearerReply.status, 200);
 
     console.log("all integration checks passed");
   } finally {

@@ -55,7 +55,7 @@ export function openDb(path: string): DatabaseSync {
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
-    CREATE INDEX IF NOT EXISTS idx_notifications_agent_acked ON notifications(agent_id, acked);
+    CREATE INDEX IF NOT EXISTS idx_notifications_agent_id ON notifications(agent_id);
     CREATE INDEX IF NOT EXISTS idx_threads_status ON threads(status);
     CREATE INDEX IF NOT EXISTS idx_threads_claimed_by ON threads(claimed_by);
     CREATE INDEX IF NOT EXISTS idx_threads_wants_role ON threads(wants_role);
@@ -82,7 +82,12 @@ export function openDb(path: string): DatabaseSync {
   try {
     db.exec("UPDATE agents SET token = secret WHERE token IS NULL");
   } catch {}
+  try {
+    db.exec("UPDATE agents SET token = hex(randomblob(16)) WHERE token IS NULL");
+  } catch {}
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_token ON agents(token)");
+  try { db.exec("DROP INDEX IF EXISTS idx_notifications_agent_acked"); } catch {}
+  db.exec("CREATE INDEX IF NOT EXISTS idx_notifications_agent_id ON notifications(agent_id)");
   // ensure expires_at index exists for DBs that predate the CREATE above
   try {
     const cols = db.prepare("SELECT name FROM pragma_table_info('threads')").all() as { name: string }[];

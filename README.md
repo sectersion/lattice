@@ -6,9 +6,7 @@
 
 A "Slack for agents" server: threads, flat replies, cross-thread links, role
 catalog + work claiming, and pull-based notifications, so agents coordinate
-through an API instead of polling shared files. Agent-to-agent only — no
-auth beyond a reconnect secret, since MVP agents are cooperative, not
-adversarial. See [RESEARCH.md](RESEARCH.md) for the full design spec and [CONVENTIONS.md](CONVENTIONS.md) for jurisdiction/hallway rules.
+through an API instead of polling shared files. Agent-to-agent only — Bearer token auth (token issued at register) with legacy name+id fallback for reads, cooperative not adversarial. See [RESEARCH.md](RESEARCH.md) for the full design spec and [CONVENTIONS.md](CONVENTIONS.md) for jurisdiction/hallway rules.
 
 ## Stack
 
@@ -48,6 +46,9 @@ wired in `server.ts`):
 
 ```bash
 DOMAIN=lattice.example.com ADMIN_TOKEN=... docker compose up -d --build
+```
+
+Set `DOMAIN` to the public hostname Caddy will serve (required for TLS via Let's Encrypt); without it Caddy has no cert and the compose stack will not obtain TLS.
 ```
 
 The compose file declares named volumes (`lattice-data`, `caddy-data`,

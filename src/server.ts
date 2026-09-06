@@ -8,11 +8,24 @@ import { emitOtelLog } from "./otel.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function sweepExpiredThreads(db: DatabaseSync) {
+export function sweepExpiredThreads(
+  db: DatabaseSync,
+  opts?: { audit?: (fields: Record<string, unknown>) => void; broadcast?: (event: Record<string, unknown>) => void }
+) {
   try {
     const now = Date.now();
+    const expired = db
+      .prepare("SELECT id FROM threads WHERE status='open' AND expires_at IS NOT NULL AND expires_at <= ?")
+      .all(now) as { id: number }[];
+    if (expired.length === 0) return 0;
     const res = db.prepare("UPDATE threads SET status='closed' WHERE status='open' AND expires_at IS NOT NULL AND expires_at <= ?").run(now);
     if ((res.changes as number) > 0) log({ message: "ttl sweep closed", closed: res.changes });
+    if (opts?.audit || opts?.broadcast) {
+      for (const row of expired) {
+        try { opts.audit?.({ action: "ttl_sweep_close", thread_id: row.id }); } catch {}
+        try { opts.broadcast?.({ type: "thread_closed", thread_id: row.id }); } catch {}
+      }
+    }
     return res.changes as number;
   } catch { return 0; }
 }
@@ -46,6 +59,11 @@ function rateLimiter(maxPerWindow: number, windowMs: number) {
     const bearer = req.header("authorization")?.replace(/^Bearer\s+/i, "");
     const key = bearer || req.ip || "unknown";
     const now = Date.now();
+    if (hits.size > 100) {
+      for (const [k, v] of hits) {
+        if (v.resetAt <= now) hits.delete(k);
+      }
+    }
     const entry = hits.get(key);
     if (!entry || entry.resetAt <= now) {
       hits.set(key, { count: 1, resetAt: now + windowMs });
@@ -136,9 +154,14 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     return { id: row.id, name: row.name };
   }
 
+  const lastTouch = new Map<number, number>();
   function touchAgent(agentId: number) {
+    const now = Date.now();
+    const last = lastTouch.get(agentId);
+    if (last !== undefined && now - last < 30000) return;
+    lastTouch.set(agentId, now);
     try {
-      db.prepare("UPDATE agents SET last_seen = ? WHERE id = ?").run(Date.now(), agentId);
+      db.prepare("UPDATE agents SET last_seen = ? WHERE id = ?").run(now, agentId);
     } catch {}
   }
 
@@ -177,7 +200,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     return !!db.prepare("SELECT 1 FROM roles WHERE name = ?").get(role);
   }
 
-  function sweepExpired() { sweepExpiredThreads(db); }
+  function sweepExpired() { sweepExpiredThreads(db, { audit, broadcast }); }
   try { sweepExpired(); } catch {}
   const sweepInterval = setInterval(sweepExpired, 5 * 60 * 1000);
   // allow process to exit in tests even if server not closed
@@ -269,9 +292,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   const writeLimiter = rateLimiter(120, 60_000);
 
   app.post("/agents/status", writeLimiter, (req: Request, res: Response) => {
-    const { name, id, status } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
+    const { status } = req.body ?? {};
     if (status !== null && typeof status !== "string") {
       return res.status(400).json({ error: "status must be a string or null" });
     }
@@ -282,9 +305,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.post("/roles", (req: Request, res: Response) => {
-    const { name, id, role } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
+    const { role } = req.body ?? {};
     if (typeof role !== "string" || !role) return res.status(400).json({ error: "role required" });
 
     db.prepare("INSERT OR IGNORE INTO roles (name, created_by, created_at) VALUES (?, ?, ?)").run(
@@ -302,9 +325,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.post("/threads", writeLimiter, (req: Request, res: Response) => {
-    const { name, id, title, body, wants_role, expires_at } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
+    const { title, body, wants_role, expires_at } = req.body ?? {};
     if (typeof title !== "string" || typeof body !== "string") {
       return res.status(400).json({ error: "title and body required" });
     }
@@ -353,9 +376,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   app.post("/threads/:id/reply", writeLimiter, (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
     if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
-    const { name, id, body, link_thread_id } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
+    const { body, link_thread_id } = req.body ?? {};
     if (typeof body !== "string") return res.status(400).json({ error: "body required" });
 
     const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(threadId);
@@ -482,9 +505,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.post("/subscribe", writeLimiter, (req: Request, res: Response) => {
-    const { name, id, thread_id } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
+    const { thread_id } = req.body ?? {};
     const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(Number(thread_id));
     if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
     db.prepare("INSERT OR IGNORE INTO subscriptions (thread_id, agent_id) VALUES (?, ?)").run(
@@ -496,9 +519,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.post("/unsubscribe", writeLimiter, (req: Request, res: Response) => {
-    const { name, id, thread_id } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
+    const { thread_id } = req.body ?? {};
     const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(Number(thread_id));
     if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
     db.prepare("DELETE FROM subscriptions WHERE thread_id = ? AND agent_id = ?").run(
@@ -512,9 +535,8 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   app.post("/threads/:id/close", (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
     if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
-    const { name, id } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
 
     const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(threadId);
     if (!thread) return res.status(404).json({ error: "unknown thread, check thread id" });
@@ -533,9 +555,8 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   app.post("/threads/:id/claim", writeLimiter, (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
     if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
-    const { name, id } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
 
     const thread = db.prepare("SELECT id, claimed_by FROM threads WHERE id = ?").get(threadId) as
       | { id: number; claimed_by: number | null }
@@ -561,9 +582,8 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   app.post("/threads/:id/unclaim", writeLimiter, (req: Request, res: Response) => {
     const threadId = Number(req.params.id);
     if (!Number.isInteger(threadId)) return res.status(400).json({ error: "invalid thread id" });
-    const { name, id } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
 
     const thread = db.prepare("SELECT claimed_by FROM threads WHERE id = ?").get(threadId) as
       | { claimed_by: number | null }
@@ -653,9 +673,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.post("/ignore-notif", writeLimiter, (req: Request, res: Response) => {
-    const { name, id, notif_id } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
+    const { notif_id } = req.body ?? {};
     const row = db
       .prepare("SELECT id FROM notifications WHERE id = ? AND agent_id = ?")
       .get(Number(notif_id), agent.id);
@@ -665,9 +685,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.post("/ignore-notif/batch", writeLimiter, (req: Request, res: Response) => {
-    const { name, id, notif_ids } = req.body ?? {};
-    const agent = resolveAgent(name, id);
-    if (!agent) return res.status(400).json({ error: "unknown agent" });
+    const agent = resolveAuth(req);
+    if (!agent) return res.status(401).json({ error: "unauthorized" });
+    const { notif_ids } = req.body ?? {};
     if (!Array.isArray(notif_ids)) return res.status(400).json({ error: "notif_ids required" });
     const ack = db.prepare("DELETE FROM notifications WHERE id = ? AND agent_id = ?");
     let acked = 0;
