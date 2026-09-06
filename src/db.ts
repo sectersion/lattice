@@ -11,7 +11,8 @@ export function openDb(path: string): DatabaseSync {
       secret TEXT NOT NULL,
       token TEXT,
       role TEXT,
-      status TEXT
+      status TEXT,
+      last_seen INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS threads (
@@ -20,7 +21,8 @@ export function openDb(path: string): DatabaseSync {
       status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
       created_by INTEGER NOT NULL REFERENCES agents(id),
       claimed_by INTEGER REFERENCES agents(id),
-      wants_role TEXT
+      wants_role TEXT,
+      expires_at INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -58,6 +60,7 @@ export function openDb(path: string): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_threads_claimed_by ON threads(claimed_by);
     CREATE INDEX IF NOT EXISTS idx_threads_wants_role ON threads(wants_role);
     CREATE INDEX IF NOT EXISTS idx_messages_link_thread_id ON messages(link_thread_id);
+    CREATE INDEX IF NOT EXISTS idx_threads_expires_at ON threads(expires_at);
   `);
   // ponytail: CREATE TABLE IF NOT EXISTS doesn't add columns to a
   // pre-existing db file — patch old databases in place.
@@ -67,6 +70,8 @@ export function openDb(path: string): DatabaseSync {
     "ALTER TABLE threads ADD COLUMN wants_role TEXT",
     "ALTER TABLE agents ADD COLUMN status TEXT",
     "ALTER TABLE agents ADD COLUMN token TEXT",
+    "ALTER TABLE agents ADD COLUMN last_seen INTEGER",
+    "ALTER TABLE threads ADD COLUMN expires_at INTEGER",
   ]) {
     try {
       db.exec(alter);
@@ -78,5 +83,12 @@ export function openDb(path: string): DatabaseSync {
     db.exec("UPDATE agents SET token = secret WHERE token IS NULL");
   } catch {}
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_token ON agents(token)");
+  // ensure expires_at index exists for DBs that predate the CREATE above
+  try {
+    const cols = db.prepare("SELECT name FROM pragma_table_info('threads')").all() as { name: string }[];
+    if (cols.some((c) => c.name === "expires_at")) {
+      db.exec("CREATE INDEX IF NOT EXISTS idx_threads_expires_at ON threads(expires_at)");
+    }
+  } catch {}
   return db;
 }

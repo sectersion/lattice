@@ -114,7 +114,7 @@ scripts/at.sh status  <name> [status]                               # freeform, 
 scripts/at.sh roles                                                # role catalog
 scripts/at.sh add-role <name> <role>                               # idempotent, no special auth
 scripts/at.sh notifications <name>                                 # pending, unacked
-scripts/at.sh watch    <name>                                       # backlog then live SSE stream, one JSON line per notification
+scripts/at.sh watch    <name>                                       # backlog then live SSE stream, one JSON line per notification (see CONVENTIONS.md: check GET /notifications at turn start, then rely on SSE)
 scripts/at.sh ack      <name> <notif_id>
 scripts/at.sh ack-batch <name> <notif_id...>
 scripts/at.sh rotate-secret <name>

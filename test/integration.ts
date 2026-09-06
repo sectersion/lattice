@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { openDb } from "../src/db.js";
-import { createServer } from "../src/server.js";
+import { createServer, sweepExpiredThreads } from "../src/server.js";
 
 async function main() {
   const dbPath = path.join(os.tmpdir(), `agent-threads-test-${Date.now()}.db`);
@@ -618,6 +618,42 @@ async function main() {
     assert.notStrictEqual(sseResult, "timeout", "expected an SSE 'message' event within 5s");
     assert.match(sseResult as string, /"type":"message"/);
     sseController.abort();
+
+    // 27. presence: GET /agents returns presence derived from last_seen
+    // touch A via authenticated request, then verify presence is active/idle
+    await call("GET", "/notifications", undefined, auth(a.json.token));
+    const agentsPresence = await call("GET", "/agents");
+    const aPresence = agentsPresence.json.agents.find((ag: { id: number }) => ag.id === a.json.id);
+    assert.ok(aPresence.last_seen, "last_seen should be set after auth");
+    assert.ok(["active", "idle"].includes(aPresence.presence), `presence should be active|idle, got ${aPresence.presence}`);
+    // stale check: manually set last_seen far in past and verify stale
+    db.prepare("UPDATE agents SET last_seen = ? WHERE id = ?").run(Date.now() - 20 * 60 * 1000, a.json.id);
+    const agentsStale = await call("GET", "/agents");
+    const aStale = agentsStale.json.agents.find((ag: { id: number }) => ag.id === a.json.id);
+    assert.strictEqual(aStale.presence, "stale");
+
+    // 28. hallway TTL: POST /threads with expires_at (future) succeeds, past rejected, sweep closes expired
+    const ttlFuture = await call("POST", "/threads", {
+      name: "A", id: a.json.id, title: "TTL future", body: "ephemeral", expires_at: Date.now() + 60_000,
+    });
+    assert.strictEqual(ttlFuture.status, 200);
+    const ttlPast = await call("POST", "/threads", {
+      name: "A", id: a.json.id, title: "TTL past", body: "bad", expires_at: Date.now() - 1000,
+    });
+    assert.strictEqual(ttlPast.status, 400);
+    const ttlIso = await call("POST", "/threads", {
+      name: "A", id: a.json.id, title: "TTL iso", body: "iso", expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.strictEqual(ttlIso.status, 200);
+    // insert an already-expired thread directly via DB and verify sweep closes it
+    const expiredThreadId = Number(db.prepare("INSERT INTO threads (title, created_by, expires_at, status) VALUES (?,?,?,?)").run("expired", a.json.id, Date.now() - 1000, "open").lastInsertRowid);
+    db.prepare("INSERT INTO messages (thread_id, author_id, body, created_at) VALUES (?,?,?,?)").run(expiredThreadId, a.json.id, "body", Date.now());
+    sweepExpiredThreads(db);
+    const expiredRow = db.prepare("SELECT status FROM threads WHERE id = ?").get(expiredThreadId) as { status: string };
+    assert.strictEqual(expiredRow.status, "closed");
+    // still readable by id, but filtered from open list
+    const openThreads = await call("GET", "/threads?status=open");
+    assert.ok(!openThreads.json.threads.some((t: { id: number }) => t.id === expiredThreadId));
 
     console.log("all integration checks passed");
   } finally {
