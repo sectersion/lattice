@@ -8,6 +8,15 @@ import { emitOtelLog } from "./otel.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+export function sweepExpiredThreads(db: DatabaseSync) {
+  try {
+    const now = Date.now();
+    const res = db.prepare("UPDATE threads SET status='closed' WHERE status='open' AND expires_at IS NOT NULL AND expires_at <= ?").run(now);
+    if ((res.changes as number) > 0) log({ message: "ttl sweep closed", closed: res.changes });
+    return res.changes as number;
+  } catch { return 0; }
+}
+
 export function log(fields: Record<string, unknown>) {
   console.log(JSON.stringify({ ts: new Date().toISOString(), ...fields }));
   emitOtelLog(fields);
@@ -127,13 +136,22 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     return { id: row.id, name: row.name };
   }
 
+  function touchAgent(agentId: number) {
+    try {
+      db.prepare("UPDATE agents SET last_seen = ? WHERE id = ?").run(Date.now(), agentId);
+    } catch {}
+  }
+
   function resolveAuth(req: Request): { id: number; name: string } | null {
     const auth = req.header("authorization");
     if (auth) {
       const m = auth.match(/^Bearer\s+(.+)$/i);
       if (m) {
         const agent = resolveAgentByToken(m[1].trim());
-        if (agent) return agent;
+        if (agent) {
+          touchAgent(agent.id);
+          return agent;
+        }
         return null;
       }
     }
@@ -145,6 +163,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     if (legacy) {
       const row = db.prepare("SELECT name FROM agents WHERE id = ?").get(legacy.id) as { name: string } | undefined;
       log({ level: "warn", message: "deprecated auth: name+id without Bearer token", agent_id: legacy.id });
+      touchAgent(legacy.id);
       return { id: legacy.id, name: row?.name ?? String(name) };
     }
     return null;
@@ -156,6 +175,14 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
 
   function roleExists(role: string): boolean {
     return !!db.prepare("SELECT 1 FROM roles WHERE name = ?").get(role);
+  }
+
+  function sweepExpired() { sweepExpiredThreads(db); }
+  try { sweepExpired(); } catch {}
+  const sweepInterval = setInterval(sweepExpired, 5 * 60 * 1000);
+  // allow process to exit in tests even if server not closed
+  if (typeof (sweepInterval as unknown as { unref?: () => void }).unref === "function") {
+    (sweepInterval as unknown as { unref: () => void }).unref();
   }
 
   app.post("/register", rateLimiter(30, 60_000), (req: Request, res: Response) => {
@@ -219,8 +246,20 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.get("/agents", (_req: Request, res: Response) => {
-    const rows = db.prepare("SELECT id, name, role, status FROM agents").all();
-    res.json({ agents: rows });
+    const rows = db.prepare("SELECT id, name, role, status, last_seen FROM agents").all() as { id: number; name: string; role: string | null; status: string | null; last_seen: number | null }[];
+    const now = Date.now();
+    const agents = rows.map((r) => {
+      let presence: string;
+      if (!r.last_seen) presence = "stale";
+      else {
+        const age = now - r.last_seen;
+        if (age < 120_000) presence = "active";
+        else if (age < 600_000) presence = "idle";
+        else presence = "stale";
+      }
+      return { ...r, presence };
+    });
+    res.json({ agents });
   });
 
   // 120/min per IP: a busy multi-agent run (several agents posting status
@@ -263,7 +302,7 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
   });
 
   app.post("/threads", writeLimiter, (req: Request, res: Response) => {
-    const { name, id, title, body, wants_role } = req.body ?? {};
+    const { name, id, title, body, wants_role, expires_at } = req.body ?? {};
     const agent = resolveAgent(name, id);
     if (!agent) return res.status(400).json({ error: "unknown agent" });
     if (typeof title !== "string" || typeof body !== "string") {
@@ -276,10 +315,22 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     if (typeof wants_role === "string" && roleCatalogSize() > 0 && !roleExists(wants_role)) {
       return res.status(400).json({ error: "unknown role, see GET /roles" });
     }
+    let expiresAt: number | null = null;
+    if (expires_at !== undefined && expires_at !== null) {
+      if (typeof expires_at === "number") expiresAt = expires_at;
+      else if (typeof expires_at === "string") {
+        const parsed = Date.parse(expires_at);
+        if (Number.isNaN(parsed)) return res.status(400).json({ error: "invalid expires_at" });
+        expiresAt = parsed;
+      } else {
+        return res.status(400).json({ error: "invalid expires_at" });
+      }
+      if (expiresAt <= Date.now()) return res.status(400).json({ error: "expires_at must be in the future" });
+    }
 
     const threadResult = db
-      .prepare("INSERT INTO threads (title, created_by, wants_role) VALUES (?, ?, ?)")
-      .run(title, agent.id, typeof wants_role === "string" ? wants_role : null);
+      .prepare("INSERT INTO threads (title, created_by, wants_role, expires_at) VALUES (?, ?, ?, ?)")
+      .run(title, agent.id, typeof wants_role === "string" ? wants_role : null, expiresAt);
     const threadId = Number(threadResult.lastInsertRowid);
 
     const msgResult = db
