@@ -17,6 +17,12 @@ const server = app.listen(port, () => {
 function shutdown() {
   log({ message: "shutting down" });
   server.close(() => {
+    try {
+      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      log({ message: "wal checkpoint complete" });
+    } catch (err) {
+      log({ level: "warn", message: "wal checkpoint failed", error: String(err) });
+    }
     db.close();
     process.exit(0);
   });

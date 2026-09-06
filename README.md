@@ -42,11 +42,20 @@ docker build -t lattice .
 docker run -d -p 3000:3000 -v lattice-data:/data lattice
 ```
 
-There's no `docker-compose.yml` in this repo — one container, one named
-volume is the whole deployment. If you're running this alongside an OTel
-collector, wire it with `-e OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=...` (see
-Observability below) rather than adding compose orchestration for a single
-extra env var.
+Or with TLS via the reference `docker-compose.yml` + `Caddyfile` (Caddy
+terminates TLS and proxies to `lattice:3000`; `TRUST_PROXY=1` is already
+wired in `server.ts`):
+
+```bash
+DOMAIN=lattice.example.com ADMIN_TOKEN=... docker compose up -d --build
+```
+
+The compose file declares named volumes (`lattice-data`, `caddy-data`,
+`caddy-config`) so the sqlite file (plus its `-wal`/`-shm` siblings and
+`audit.jsonl`) and Caddy's certs survive recreation. If you're running this
+alongside an OTel collector, add `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` to the
+`lattice` service environment rather than adding separate orchestration for a
+single env var.
 
 **Bare metal / VM** — same as local, just run it as a long-lived process
 (systemd unit, `pm2`, whatever your host already uses) with `DB_PATH`
@@ -55,15 +64,15 @@ pointed at a real disk path and `PORT` set if `3000` is taken.
 ### Required before exposing it beyond localhost
 
 - **TLS**: Lattice has none built in and sends secrets in request bodies.
-  Put a reverse proxy in front (nginx, Caddy, Cloudflare Tunnel) and
-  terminate TLS there. The server explicitly does **not** set Express's
-  `trust proxy` (see the comment in `server.ts`) — there's no proxy in the
-  reference deployment, so `req.ip` stays the real socket address rather
-  than a spoofable `X-Forwarded-For`. If you do put a reverse proxy in
-  front, you'll need to revisit that.
-- **`ADMIN_TOKEN`**: unset by default, meaning `POST /admin/threads/:id/close`
-  is wide open. Set it once this is reachable outside a fully trusted
-  network.
+  The reference `Caddyfile` + `docker-compose.yml` (`caddy:2-alpine`
+  terminates TLS and reverse-proxies to `lattice:3000`) is the intended way
+  to expose it. `TRUST_PROXY=1` is wired in `server.ts` (set when behind
+  the proxy) so `req.ip` reflects the real client via `X-Forwarded-For`;
+  without a proxy the flag is unset so `req.ip` stays the socket address
+  and `X-Forwarded-For` can't be spoofed to bypass rate limiting.
+- **`ADMIN_TOKEN`**: unset by default — `POST /admin/threads/:id/close` then
+  only allows loopback (`127.0.0.1`/`::1`), otherwise 401. Set `ADMIN_TOKEN`
+  and send `Authorization: Bearer <token>` once reachable beyond localhost.
 - **Rate limiting**: only `POST /register` is limited (30/min/IP,
   in-process, fixed-window — resets on restart, doesn't share state across
   replicas). Every other route is unlimited; the trust model is
@@ -75,7 +84,8 @@ pointed at a real disk path and `PORT` set if `3000` is taken.
 |---|---|---|
 | `PORT` | `3000` | HTTP listen port |
 | `DB_PATH` | `/data/threads.db` | sqlite file location (WAL mode; `-wal`/`-shm` files and `audit.jsonl` live alongside it) |
-| `ADMIN_TOKEN` | unset | `Bearer` token required on `POST /admin/threads/:id/close` when set |
+| `TRUST_PROXY` | unset | set to `1` when behind a reverse proxy (e.g. Caddy) so `req.ip` uses `X-Forwarded-For` |
+| `ADMIN_TOKEN` | unset | `Bearer` token for `POST /admin/threads/:id/close`; when unset that route is loopback-only (fail-closed) |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | enables shipping structured logs to an OTLP collector (e.g. Loki) — off by default |
 | `OTEL_SERVICE_NAME` | `lattice` | overrides the `service.name` OTel resource attribute |
 
@@ -85,7 +95,7 @@ ready to pipe into any log collector regardless of whether OTel is enabled.
 
 ## API
 
-- `POST /register {name, role?}` → `{id, secret}`. Reconnect with
+- `POST /register {name, role?}` → `{id, secret, token}` (`token` is the `Bearer` token for subsequent requests). Reconnect with
   `{name, secret}` is idempotent; wrong/missing secret on a taken name →
   409 `"name taken"`. `role` must be a name already in the role catalog
   (`GET /roles`) once that catalog is non-empty; an empty catalog accepts

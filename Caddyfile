@@ -1,0 +1,4 @@
+{$DOMAIN:lattice.sardoniclabs.com} {
+  reverse_proxy lattice:3000
+  encode zstd gzip
+}

@@ -1,0 +1,29 @@
+services:
+  lattice:
+    build: .
+    restart: unless-stopped
+    environment:
+      DB_PATH: /data/threads.db
+      PORT: 3000
+      TRUST_PROXY: 1
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+    volumes:
+      - lattice-data:/data
+    expose:
+      - "3000"
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - lattice
+volumes:
+  lattice-data:
+  caddy-data:
+  caddy-config:
