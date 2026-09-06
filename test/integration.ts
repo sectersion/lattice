@@ -14,14 +14,17 @@ async function main() {
   const port = (server.address() as { port: number }).port;
   const base = `http://localhost:${port}`;
 
-  async function call(method: string, url: string, body?: unknown) {
+  async function call(method: string, url: string, body?: unknown, extraHeaders?: Record<string,string>) {
+    const headers: Record<string,string> = { ...(extraHeaders || {}) };
+    if (body) headers["content-type"] = "application/json";
     const res = await fetch(base + url, {
       method,
-      headers: body ? { "content-type": "application/json" } : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
     return { status: res.status, json: await res.json() };
   }
+  function auth(token: string){ return { authorization: `Bearer ${token}` }; }
 
   try {
     // 1. register agents A, B, C
@@ -78,18 +81,20 @@ async function main() {
       body: "reply from B",
     });
     assert.strictEqual(r1.status, 200);
-    const notifsA = await call("GET", `/notifications?id=${a.json.id}`);
+    const notifsA = await call("GET", "/notifications", undefined, auth(a.json.token));
     assert.strictEqual(notifsA.json.notifications.length, 1);
 
     // 4b. GET /notifications/count matches the pending list length
-    const countA = await call("GET", `/notifications/count?id=${a.json.id}`);
+    const countA = await call("GET", "/notifications/count", undefined, auth(a.json.token));
     assert.strictEqual(countA.json.count, notifsA.json.notifications.length);
 
     // 4c. GET /notifications/stream pushes live to the subscribed agent only,
     // not to an unrelated connected agent (C, not subscribed to thread1).
-    async function readOneSseEvent(url: string, timeoutMs = 2000): Promise<Record<string, unknown>> {
+    async function readOneSseEvent(url: string, timeoutMs = 2000, token?: string): Promise<Record<string, unknown>> {
       const controller = new AbortController();
-      const res = await fetch(base + url, { signal: controller.signal });
+      const headers: Record<string,string> = {};
+      if (token) headers["authorization"] = `Bearer ${token}`;
+      const res = await fetch(base + url, { signal: controller.signal, headers: Object.keys(headers).length ? headers : undefined });
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let buf = "";
@@ -108,8 +113,8 @@ async function main() {
       }
     }
 
-    const streamA = readOneSseEvent(`/notifications/stream?name=A&id=${a.json.id}`);
-    const streamCTimedOut = readOneSseEvent(`/notifications/stream?name=C&id=${c.json.id}`, 500).then(
+    const streamA = readOneSseEvent("/notifications/stream", 2000, a.json.token);
+    const streamCTimedOut = readOneSseEvent("/notifications/stream", 500, c.json.token).then(
       () => "got-event",
       () => "timed-out"
     );
@@ -140,13 +145,13 @@ async function main() {
       link_thread_id: thread2,
     });
     assert.strictEqual(r2.status, 200);
-    const notifsC = await call("GET", `/notifications?id=${c.json.id}`);
+    const notifsC = await call("GET", "/notifications", undefined, auth(c.json.token));
     assert.strictEqual(notifsC.json.notifications.length, 1);
-    const notifsB = await call("GET", `/notifications?id=${b.json.id}`);
+    const notifsB = await call("GET", "/notifications", undefined, auth(b.json.token));
     assert.strictEqual(notifsB.json.notifications.length, 0); // B is author, no self-notify
 
     // 6. self-link -> no duplicate notification
-    const beforeSelfLink = (await call("GET", `/notifications?id=${a.json.id}`)).json
+    const beforeSelfLink = (await call("GET", "/notifications", undefined, auth(a.json.token))).json
       .notifications.length;
     await call("POST", `/threads/${thread1}/reply`, {
       name: "B",
@@ -154,7 +159,7 @@ async function main() {
       body: "self link",
       link_thread_id: thread1,
     });
-    const afterSelfLink = (await call("GET", `/notifications?id=${a.json.id}`)).json
+    const afterSelfLink = (await call("GET", "/notifications", undefined, auth(a.json.token))).json
       .notifications.length;
     assert.strictEqual(afterSelfLink, beforeSelfLink + 1); // only one notif, from the reply itself
 
@@ -196,7 +201,7 @@ async function main() {
     assert.strictEqual(paged.json.messages[0].id, firstBatchOldestId);
 
     // 9. ack a notification -> disappears
-    const notifToAck = (await call("GET", `/notifications?id=${a.json.id}`)).json
+    const notifToAck = (await call("GET", "/notifications", undefined, auth(a.json.token))).json
       .notifications[0];
     const ackRes = await call("POST", "/ignore-notif", {
       name: "A",
@@ -204,14 +209,14 @@ async function main() {
       notif_id: notifToAck.notif_id,
     });
     assert.strictEqual(ackRes.status, 200);
-    const afterAck = (await call("GET", `/notifications?id=${a.json.id}`)).json.notifications;
+    const afterAck = (await call("GET", "/notifications", undefined, auth(a.json.token))).json.notifications;
     assert.ok(!afterAck.some((n: { notif_id: number }) => n.notif_id === notifToAck.notif_id));
 
     // 9b. ack every remaining notification for A -> count goes to 0
     for (const n of afterAck) {
       await call("POST", "/ignore-notif", { name: "A", id: a.json.id, notif_id: n.notif_id });
     }
-    const countAfterAckAll = await call("GET", `/notifications/count?id=${a.json.id}`);
+    const countAfterAckAll = await call("GET", "/notifications/count", undefined, auth(a.json.token));
     assert.strictEqual(countAfterAckAll.json.count, 0);
 
     // 10. close a thread -> reply after close still succeeds
@@ -276,7 +281,7 @@ async function main() {
     // 16. POST /ignore-notif/batch acks several at once, unknown ids ignored
     await call("POST", `/threads/${thread1}/reply`, { name: "B", id: b.json.id, body: "x1" });
     await call("POST", `/threads/${thread1}/reply`, { name: "B", id: b.json.id, body: "x2" });
-    const pendingA = (await call("GET", `/notifications?id=${a.json.id}`)).json.notifications;
+    const pendingA = (await call("GET", "/notifications", undefined, auth(a.json.token))).json.notifications;
     const idsToAck = pendingA.slice(0, 2).map((n: { notif_id: number }) => n.notif_id);
     const batchRes = await call("POST", "/ignore-notif/batch", {
       name: "A",
@@ -285,7 +290,7 @@ async function main() {
     });
     assert.strictEqual(batchRes.status, 200);
     assert.strictEqual(batchRes.json.acked, idsToAck.length);
-    const afterBatch = (await call("GET", `/notifications?id=${a.json.id}`)).json.notifications;
+    const afterBatch = (await call("GET", "/notifications", undefined, auth(a.json.token))).json.notifications;
     assert.ok(!afterBatch.some((n: { notif_id: number }) => idsToAck.includes(n.notif_id)));
 
     // 17. POST /agents/rotate-secret
@@ -513,7 +518,7 @@ async function main() {
       id: d.json.id,
       body: "any update?",
     });
-    const cNotifsAfterClaim = await call("GET", `/notifications?id=${c.json.id}`);
+    const cNotifsAfterClaim = await call("GET", "/notifications", undefined, auth(c.json.token));
     assert.ok(
       cNotifsAfterClaim.json.notifications.some(
         (n: { thread_id: number }) => n.thread_id === thread3

@@ -9,6 +9,7 @@ export function openDb(path: string): DatabaseSync {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT UNIQUE NOT NULL,
       secret TEXT NOT NULL,
+      token TEXT,
       role TEXT,
       status TEXT
     );
@@ -65,6 +66,7 @@ export function openDb(path: string): DatabaseSync {
     "ALTER TABLE threads ADD COLUMN claimed_by INTEGER REFERENCES agents(id)",
     "ALTER TABLE threads ADD COLUMN wants_role TEXT",
     "ALTER TABLE agents ADD COLUMN status TEXT",
+    "ALTER TABLE agents ADD COLUMN token TEXT",
   ]) {
     try {
       db.exec(alter);
@@ -72,5 +74,9 @@ export function openDb(path: string): DatabaseSync {
       if (!String(err?.message).includes("duplicate column name")) throw err;
     }
   }
+  try {
+    db.exec("UPDATE agents SET token = secret WHERE token IS NULL");
+  } catch {}
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_token ON agents(token)");
   return db;
 }
