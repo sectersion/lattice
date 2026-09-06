@@ -1,0 +1,18 @@
+# litestream.yml — reference config for Lattice
+# Local disk is primary; litestream replicates async to S3/R2.
+# Run as sidecar: litestream replicate -config litestream.yml
+# Requires env: LITESTREAM_BUCKET, LITESTREAM_ACCESS_KEY_ID,
+# LITESTREAM_SECRET_ACCESS_KEY. For Cloudflare R2 set LITESTREAM_ENDPOINT
+# to https://<account>.r2.cloudflarestorage.com and LITESTREAM_REGION to auto.
+# Restore: litestream restore -config litestream.yml /data/threads.db
+
+dbs:
+  - path: /data/threads.db
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: lattice
+        endpoint: ${LITESTREAM_ENDPOINT:-}
+        region: ${LITESTREAM_REGION:-auto}
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}

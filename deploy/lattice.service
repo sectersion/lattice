@@ -1,0 +1,19 @@
+[Unit]
+Description=Lattice A2A server
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/node /opt/lattice/dist/index.js
+Restart=always
+RestartSec=2
+Environment=DB_PATH=/var/lib/lattice/threads.db
+Environment=PORT=3000
+Environment=NODE_ENV=production
+WorkingDirectory=/opt/lattice
+User=lattice
+Group=lattice
+StateDirectory=lattice
+LogsDirectory=lattice
+
+[Install]
+WantedBy=multi-user.target
