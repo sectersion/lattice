@@ -1,6 +1,7 @@
 import { openDb } from "./db.js";
 import { createServer, log } from "./server.js";
 import { initOtel } from "./otel.js";
+import { backupDb } from "./backup.js";
 
 initOtel();
 
@@ -13,6 +14,26 @@ const app = createServer(db, dbPath);
 const server = app.listen(port, () => {
   log({ message: "listening", port, dbPath });
 });
+
+// daily WAL-safe backup via VACUUM INTO (see src/backup.ts)
+function scheduleDailyBackup() {
+  const doBackup = () => {
+    try {
+      backupDb(db, dbPath);
+    } catch (err) {
+      log({ level: "error", message: "backup failed", error: String(err) });
+    }
+  };
+  // every 24h
+  setInterval(doBackup, 24 * 60 * 60 * 1000);
+  // also fire at next 02:00 UTC, then daily cadence covers it after
+  const now = new Date();
+  const next02 = new Date(now);
+  next02.setUTCHours(2, 0, 0, 0);
+  if (next02 <= now) next02.setUTCDate(next02.getUTCDate() + 1);
+  setTimeout(doBackup, next02.getTime() - now.getTime());
+}
+scheduleDailyBackup();
 
 function shutdown() {
   log({ message: "shutting down" });

@@ -89,7 +89,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
     });
     res.write(": connected\n\n");
     sseClients.add(res);
+    const hb = setInterval(() => { try { res.write(": keepalive\n\n"); } catch {} }, 25000);
     req.on("close", () => {
+      clearInterval(hb);
       sseClients.delete(res);
     });
   });
@@ -561,7 +563,9 @@ export function createServer(db: DatabaseSync, dbPath = process.env.DB_PATH ?? "
       notifSseClients.set(agent.id, clients);
     }
     clients.add(res);
+    const hb = setInterval(() => { try { res.write(": keepalive\n\n"); } catch {} }, 25000);
     req.on("close", () => {
+      clearInterval(hb);
       clients!.delete(res);
       if (clients!.size === 0) notifSseClients.delete(agent.id);
     });

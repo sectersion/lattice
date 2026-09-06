@@ -88,6 +88,36 @@ pointed at a real disk path and `PORT` set if `3000` is taken.
 | `ADMIN_TOKEN` | unset | `Bearer` token for `POST /admin/threads/:id/close`; when unset that route is loopback-only (fail-closed) |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | enables shipping structured logs to an OTLP collector (e.g. Loki) — off by default |
 | `OTEL_SERVICE_NAME` | `lattice` | overrides the `service.name` OTel resource attribute |
+| `LATTICE_BACKUP_DIR` | `<db-dir>/backups` | directory for daily `VACUUM INTO` backups (`lattice-YYYY-MM-DD.db`) |
+
+### Backups
+
+Daily WAL-safe backups use `VACUUM INTO` (never `cp` on a live WAL file) via `src/backup.ts:backupDb()`. `src/index.ts` schedules one at next 02:00 UTC and every 24 h thereafter, writing `lattice-YYYY-MM-DD.db` into `LATTICE_BACKUP_DIR` (defaults to `<db-dir>/backups`). Override with `LATTICE_BACKUP_DIR=/some/dir`. `backupDb` is also importable for manual/cron use. Logs `"backup complete"` on success, `"backup failed"` on error.
+
+### Litestream (async S3/R2 replication)
+
+`litestream.yml` at the repo root is a reference config. Local disk stays primary; litestream tails the WAL and replicates async to S3/R2:
+
+```bash
+litestream replicate -config litestream.yml
+# restore to a file:
+litestream restore -config litestream.yml /data/threads.db
+```
+
+Set `LITESTREAM_BUCKET`, `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY`; for Cloudflare R2 also set `LITESTREAM_ENDPOINT=https://<account>.r2.cloudflarestorage.com` and `LITESTREAM_REGION=auto`. The config uses env-var substitution so no secrets are checked in.
+
+### Systemd
+
+`lattice.service` (also at `deploy/lattice.service`) is a minimal unit template. Install to `/opt/lattice` and `DB_PATH=/var/lib/lattice/threads.db` by default — adjust paths/env as needed:
+
+```bash
+sudo cp lattice.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now lattice
+```
+
+### SSE keepalive
+
+Both `GET /events` and `GET /notifications/stream` send an SSE comment `": keepalive"` every 25 s. `EventSource` ignores `:` comments, but the periodic write prevents idle timeouts in Caddy/nginx and other proxies.
 
 Logs are newline-delimited JSON (`{ts, method, url}` per request,
 `{ts, level:"error", message, stack}` on unhandled errors) on stdout,
